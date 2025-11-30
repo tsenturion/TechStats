@@ -105,7 +105,7 @@
             margin-top: 10px;
         }
 
-        .btn:hover {
+        .btn:hover:not(:disabled) {
             transform: translateY(-2px);
             box-shadow: 0 10px 20px rgba(102, 126, 234, 0.4);
         }
@@ -114,6 +114,70 @@
             background: #ccc;
             cursor: not-allowed;
             transform: none;
+        }
+
+        .progress-section {
+            margin-top: 30px;
+            padding: 25px;
+            background: #f8f9fa;
+            border-radius: 15px;
+        }
+
+        .progress-bar-container {
+            width: 100%;
+            height: 30px;
+            background: #e0e0e0;
+            border-radius: 15px;
+            overflow: hidden;
+            margin-bottom: 15px;
+            position: relative;
+        }
+
+        .progress-bar {
+            height: 100%;
+            background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
+            width: 0%;
+            transition: width 0.5s ease;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-weight: 600;
+            font-size: 0.9em;
+        }
+
+        .progress-message {
+            text-align: center;
+            color: #333;
+            font-size: 1em;
+            margin-bottom: 10px;
+            font-weight: 500;
+        }
+
+        .progress-details {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 10px;
+            margin-top: 15px;
+        }
+
+        .progress-detail {
+            background: white;
+            padding: 10px;
+            border-radius: 8px;
+            text-align: center;
+        }
+
+        .progress-detail .label {
+            font-size: 0.8em;
+            color: #666;
+            margin-bottom: 5px;
+        }
+
+        .progress-detail .value {
+            font-size: 1.2em;
+            font-weight: 700;
+            color: #667eea;
         }
 
         .results {
@@ -187,26 +251,6 @@
             text-decoration: underline;
         }
 
-        .loading {
-            text-align: center;
-            padding: 40px;
-        }
-
-        .spinner {
-            border: 4px solid #f3f3f3;
-            border-top: 4px solid #667eea;
-            border-radius: 50%;
-            width: 50px;
-            height: 50px;
-            animation: spin 1s linear infinite;
-            margin: 0 auto 20px;
-        }
-
-        @keyframes spin {
-            0% { transform: rotate(0deg); }
-            100% { transform: rotate(360deg); }
-        }
-
         .error {
             background: #ff4444;
             color: white;
@@ -217,6 +261,22 @@
 
         .hidden {
             display: none;
+        }
+
+        .cache-indicator {
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+            padding: 5px 12px;
+            background: #4caf50;
+            color: white;
+            border-radius: 20px;
+            font-size: 0.85em;
+            font-weight: 600;
+        }
+
+        .cache-indicator.low {
+            background: #ff9800;
         }
 
         @media (max-width: 768px) {
@@ -230,6 +290,10 @@
 
             .main-card {
                 padding: 20px;
+            }
+
+            .progress-details {
+                grid-template-columns: 1fr;
             }
         }
     </style>
@@ -276,9 +340,12 @@
                 <button type="submit" class="btn" id="submitBtn">Начать анализ</button>
             </form>
 
-            <div id="loading" class="loading hidden">
-                <div class="spinner"></div>
-                <p>Анализируем вакансии... Это может занять несколько минут.</p>
+            <div id="progress" class="progress-section hidden">
+                <div class="progress-bar-container">
+                    <div class="progress-bar" id="progressBar">0%</div>
+                </div>
+                <div class="progress-message" id="progressMessage">Инициализация...</div>
+                <div class="progress-details" id="progressDetails"></div>
             </div>
 
             <div id="error" class="error hidden"></div>
@@ -312,7 +379,8 @@
     </div>
 
     <script>
-        const API_URL = 'http://localhost:8000';
+        const WS_URL = 'ws://localhost:8000/ws/analyze';
+        let websocket = null;
 
         document.getElementById('analysisForm').addEventListener('submit', async (e) => {
             e.preventDefault();
@@ -325,42 +393,140 @@
                 max_pages: parseInt(document.getElementById('maxPages').value)
             };
 
-            // Показываем индикатор загрузки
-            document.getElementById('loading').classList.remove('hidden');
+            startAnalysis(formData);
+        });
+
+        function startAnalysis(formData) {
+            // Показываем прогресс-бар
+            document.getElementById('progress').classList.remove('hidden');
             document.getElementById('results').classList.add('hidden');
             document.getElementById('error').classList.add('hidden');
             document.getElementById('submitBtn').disabled = true;
 
-            try {
-                const response = await fetch(`${API_URL}/analyze`, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify(formData)
-                });
+            // Создаем WebSocket соединение
+            websocket = new WebSocket(WS_URL);
 
-                if (!response.ok) {
-                    const error = await response.json();
-                    throw new Error(error.detail || 'Ошибка при анализе');
+            websocket.onopen = () => {
+                console.log('WebSocket соединение установлено');
+                websocket.send(JSON.stringify(formData));
+            };
+
+            websocket.onmessage = (event) => {
+                const message = JSON.parse(event.data);
+                console.log('Получено сообщение:', message);
+                handleProgressUpdate(message);
+            };
+
+            websocket.onerror = (error) => {
+                console.error('WebSocket ошибка:', error);
+                showError('Ошибка соединения с сервером');
+                resetUI();
+            };
+
+            websocket.onclose = () => {
+                console.log('WebSocket соединение закрыто');
+                document.getElementById('submitBtn').disabled = false;
+            };
+        }
+
+        function handleProgressUpdate(message) {
+            const stage = message.stage;
+            const progress = message.progress || 0;
+            const msg = message.message || '';
+
+            // Обновляем прогресс-бар
+            updateProgressBar(progress, msg);
+
+            // Обновляем детали прогресса в зависимости от этапа
+            if (stage === 'fetching_vacancies') {
+                updateProgressDetails({
+                    'Найдено': message.found || '-',
+                    'Страниц': message.pages || '-',
+                    'Реальных запросов': message.real_requests || 0,
+                    'Из кэша': message.cached_requests || 0
+                });
+            } else if (stage === 'analyzing') {
+                const details = {
+                    'Обработано': `${message.processed || 0}/${message.total || 0}`,
+                    'Найдено с технологией': message.found_with_tech || 0
+                };
+
+                if (message.real_requests !== undefined) {
+                    details['Реальных запросов'] = message.real_requests;
+                    details['Из кэша'] = message.cached_requests;
+                    
+                    // Добавляем индикатор кэша
+                    if (message.cache_hit_rate !== undefined) {
+                        const cacheHitRate = message.cache_hit_rate;
+                        details['Попадание в кэш'] = `${cacheHitRate}%`;
+                    }
                 }
 
-                const data = await response.json();
-                displayResults(data);
-
-            } catch (error) {
-                showError(error.message);
-            } finally {
-                document.getElementById('loading').classList.add('hidden');
-                document.getElementById('submitBtn').disabled = false;
+                updateProgressDetails(details);
+            } else if (stage === 'finished') {
+                displayResults(message.data);
+                document.getElementById('progress').classList.add('hidden');
+            } else if (stage === 'error') {
+                showError(msg);
+                resetUI();
             }
-        });
+        }
+
+        function updateProgressBar(progress, message) {
+            const progressBar = document.getElementById('progressBar');
+            const progressMessage = document.getElementById('progressMessage');
+
+            progressBar.style.width = progress + '%';
+            progressBar.textContent = Math.round(progress) + '%';
+            progressMessage.textContent = message;
+        }
+
+        function updateProgressDetails(details) {
+            const container = document.getElementById('progressDetails');
+            container.innerHTML = '';
+
+            for (const [label, value] of Object.entries(details)) {
+                const detail = document.createElement('div');
+                detail.className = 'progress-detail';
+                
+                // Добавляем индикатор кэша если это процент попадания
+                if (label === 'Попадание в кэш') {
+                    const rate = parseFloat(value);
+                    const cacheClass = rate >= 50 ? 'cache-indicator' : 'cache-indicator low';
+                    detail.innerHTML = `
+                        <div class="label">${label}</div>
+                        <div class="value">
+                            <span class="${cacheClass}">🎯 ${value}</span>
+                        </div>
+                    `;
+                } else {
+                    detail.innerHTML = `
+                        <div class="label">${label}</div>
+                        <div class="value">${value}</div>
+                    `;
+                }
+                
+                container.appendChild(detail);
+            }
+        }
 
         function displayResults(data) {
             document.getElementById('totalVacancies').textContent = data.total_vacancies;
             document.getElementById('techVacancies').textContent = data.tech_vacancies;
             document.getElementById('percentage').textContent = data.tech_percentage.toFixed(2) + '%';
-            document.getElementById('requestsCount').textContent = data.request_stats.total_requests;
+            
+            // Отображаем статистику по запросам с индикатором кэша
+            const requestsCount = document.getElementById('requestsCount');
+            const cacheHitRate = data.request_stats.cache_hit_rate;
+            const totalRequests = data.request_stats.total_requests;
+            const cachedRequests = data.request_stats.cached_requests;
+            
+            requestsCount.innerHTML = `
+                ${totalRequests}
+                <div style="font-size: 0.5em; margin-top: 5px; opacity: 0.9;">
+                    ${cachedRequests} из кэша (${cacheHitRate}%)
+                </div>
+            `;
 
             document.getElementById('listTitle').textContent = 
                 `Вакансии с технологией "${data.technology}" (${data.tech_vacancies})`;
@@ -389,6 +555,15 @@
             const errorDiv = document.getElementById('error');
             errorDiv.textContent = `Ошибка: ${message}`;
             errorDiv.classList.remove('hidden');
+        }
+
+        function resetUI() {
+            document.getElementById('progress').classList.add('hidden');
+            document.getElementById('submitBtn').disabled = false;
+            if (websocket) {
+                websocket.close();
+                websocket = null;
+            }
         }
     </script>
 </body>
