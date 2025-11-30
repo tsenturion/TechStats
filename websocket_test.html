@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WebSocket Test</title>
+    <style>
+        body {
+            font-family: 'Courier New', monospace;
+            max-width: 800px;
+            margin: 50px auto;
+            padding: 20px;
+            background: #1e1e1e;
+            color: #d4d4d4;
+        }
+        
+        h1 {
+            color: #4ec9b0;
+        }
+        
+        #status {
+            padding: 20px;
+            border-radius: 5px;
+            margin: 20px 0;
+            font-weight: bold;
+            font-size: 1.2em;
+        }
+        
+        .connecting {
+            background: #264f78;
+            color: #9cdcfe;
+        }
+        
+        .connected {
+            background: #0e6b0e;
+            color: #b5cea8;
+        }
+        
+        .error {
+            background: #5a1d1d;
+            color: #f48771;
+        }
+        
+        .closed {
+            background: #3e3e3e;
+            color: #808080;
+        }
+        
+        #messages {
+            background: #252526;
+            border: 1px solid #3e3e3e;
+            border-radius: 5px;
+            padding: 15px;
+            max-height: 400px;
+            overflow-y: auto;
+            margin-top: 20px;
+        }
+        
+        .message {
+            margin: 10px 0;
+            padding: 10px;
+            border-left: 3px solid #4ec9b0;
+            background: #2d2d30;
+        }
+        
+        .message-time {
+            color: #6a9955;
+            font-size: 0.9em;
+        }
+        
+        .message-stage {
+            color: #dcdcaa;
+            font-weight: bold;
+        }
+        
+        .message-content {
+            color: #ce9178;
+            margin-top: 5px;
+        }
+        
+        button {
+            background: #0e639c;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 1em;
+            margin: 5px;
+        }
+        
+        button:hover {
+            background: #1177bb;
+        }
+        
+        button:disabled {
+            background: #3e3e3e;
+            cursor: not-allowed;
+        }
+    </style>
+</head>
+<body>
+    <h1>🔌 TechStats WebSocket Тест</h1>
+    
+    <div id="status" class="connecting">⏳ Подключение...</div>
+    
+    <div>
+        <button id="testBtn" onclick="runTest()">Запустить тест</button>
+        <button onclick="clearMessages()">Очистить логи</button>
+    </div>
+    
+    <h2>📋 Логи сообщений:</h2>
+    <div id="messages"></div>
+
+    <script>
+        let ws = null;
+        let messageCount = 0;
+
+        function updateStatus(text, className) {
+            const status = document.getElementById('status');
+            status.textContent = text;
+            status.className = className;
+        }
+
+        function addMessage(stage, message, data = null) {
+            const messagesDiv = document.getElementById('messages');
+            const messageDiv = document.createElement('div');
+            messageDiv.className = 'message';
+            
+            const time = new Date().toLocaleTimeString();
+            messageCount++;
+            
+            let content = `
+                <div class="message-time">[${time}] #${messageCount}</div>
+                <div class="message-stage">Stage: ${stage}</div>
+                <div class="message-content">${message}</div>
+            `;
+            
+            if (data) {
+                content += `<div class="message-content">Data: ${JSON.stringify(data, null, 2)}</div>`;
+            }
+            
+            messageDiv.innerHTML = content;
+            messagesDiv.appendChild(messageDiv);
+            messagesDiv.scrollTop = messagesDiv.scrollHeight;
+        }
+
+        function clearMessages() {
+            document.getElementById('messages').innerHTML = '';
+            messageCount = 0;
+        }
+
+        function runTest() {
+            // Закрываем предыдущее соединение если есть
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.close();
+            }
+
+            clearMessages();
+            updateStatus('⏳ Подключение к серверу...', 'connecting');
+            document.getElementById('testBtn').disabled = true;
+
+            addMessage('INFO', 'Создаем WebSocket соединение...');
+
+            // Создаем WebSocket
+            ws = new WebSocket('ws://localhost:8000/ws/analyze');
+
+            ws.onopen = () => {
+                updateStatus('✅ Подключено!', 'connected');
+                addMessage('SUCCESS', 'WebSocket соединение установлено');
+
+                // Отправляем тестовый запрос
+                const testData = {
+                    vacancy_title: 'System Analyst',
+                    technology: 'UML',
+                    exact_search: true,
+                    area: 113,
+                    max_pages: 2  // Маленькое значение для быстрого теста
+                };
+
+                addMessage('SEND', 'Отправляем тестовый запрос...', testData);
+                ws.send(JSON.stringify(testData));
+            };
+
+            ws.onmessage = (event) => {
+                try {
+                    const data = JSON.parse(event.data);
+                    const stage = data.stage || 'unknown';
+                    const message = data.message || 'No message';
+                    const progress = data.progress || 0;
+
+                    addMessage(
+                        stage.toUpperCase(), 
+                        `${message} (${progress}%)`,
+                        {
+                            progress: data.progress,
+                            found: data.found,
+                            pages: data.pages,
+                            processed: data.processed,
+                            total: data.total,
+                            real_requests: data.real_requests,
+                            cached_requests: data.cached_requests
+                        }
+                    );
+
+                    if (stage === 'finished') {
+                        updateStatus('✅ Анализ завершен!', 'connected');
+                        addMessage('SUCCESS', 'Тест успешно завершен!', {
+                            total_vacancies: data.data.total_vacancies,
+                            tech_vacancies: data.data.tech_vacancies,
+                            percentage: data.data.tech_percentage
+                        });
+                        document.getElementById('testBtn').disabled = false;
+                    }
+
+                    if (stage === 'error') {
+                        updateStatus('❌ Ошибка: ' + message, 'error');
+                        document.getElementById('testBtn').disabled = false;
+                    }
+
+                } catch (e) {
+                    addMessage('ERROR', 'Ошибка парсинга JSON: ' + e.message);
+                    console.error('Parse error:', e, event.data);
+                }
+            };
+
+            ws.onerror = (error) => {
+                updateStatus('❌ Ошибка соединения', 'error');
+                addMessage('ERROR', 'WebSocket error occurred', error);
+                console.error('WebSocket error:', error);
+                document.getElementById('testBtn').disabled = false;
+            };
+
+            ws.onclose = (event) => {
+                const reason = event.reason || 'No reason provided';
+                const code = event.code;
+                
+                if (event.wasClean) {
+                    updateStatus('🔌 Соединение закрыто', 'closed');
+                    addMessage('INFO', `Соединение закрыто корректно (код: ${code}, причина: ${reason})`);
+                } else {
+                    updateStatus('❌ Соединение разорвано', 'error');
+                    addMessage('ERROR', `Соединение разорвано (код: ${code}, причина: ${reason})`);
+                }
+                
+                document.getElementById('testBtn').disabled = false;
+            };
+        }
+
+        // Автоматический запуск при загрузке страницы
+        window.onload = () => {
+            addMessage('INFO', 'Страница загружена. Нажмите "Запустить тест" для начала.');
+            addMessage('INFO', 'Убедитесь что сервер запущен: python main.py');
+            addMessage('INFO', 'Проверить здоровье сервера: http://localhost:8000/health');
+        };
+    </script>
+</body>
+</html>

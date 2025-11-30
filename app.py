@@ -175,6 +175,8 @@ async def get_vacancies_with_progress(search_text: str, area: int, max_pages: in
     """Получение вакансий с отправкой прогресса через WebSocket"""
     reset_request_counters()
     
+    print(f"Начинаем поиск вакансий: {search_text}, область: {area}, макс. страниц: {max_pages}")
+    
     await manager.send_message({
         "stage": "fetching_vacancies",
         "message": "Получаем список вакансий...",
@@ -200,12 +202,16 @@ async def get_vacancies_with_progress(search_text: str, area: int, max_pages: in
         found = data.get('found', 0)
         vacancies = data.get('items', [])
         
+        print(f"Получен первый запрос: найдено {found} вакансий, страниц: {total_pages}, загружено: {len(vacancies)}")
+        
         await manager.send_message({
             "stage": "fetching_vacancies",
             "message": f"Найдено {found} вакансий на {total_pages} страницах",
             "progress": 10,
             "found": found,
-            "pages": total_pages
+            "pages": total_pages,
+            "real_requests": 1,
+            "cached_requests": 0
         }, websocket)
         
         if total_pages > 1:
@@ -226,6 +232,8 @@ async def get_vacancies_with_progress(search_text: str, area: int, max_pages: in
                         progress = 10 + (40 * completed_pages / total_pages)
                         real_requests, cached_requests = get_request_count()
                         
+                        print(f"Загружена страница {completed_pages}/{total_pages}, всего вакансий: {len(vacancies)}")
+                        
                         await manager.send_message({
                             "stage": "fetching_vacancies",
                             "message": f"Загружено страниц: {completed_pages}/{total_pages}",
@@ -244,9 +252,14 @@ async def get_vacancies_with_progress(search_text: str, area: int, max_pages: in
             "total_vacancies": len(vacancies)
         }, websocket)
         
+        print(f"Всего загружено вакансий: {len(vacancies)}, начинаем анализ")
+        
         return vacancies
         
     except Exception as e:
+        print(f"Ошибка при получении вакансий: {e}")
+        import traceback
+        traceback.print_exc()
         await manager.send_message({
             "stage": "error",
             "message": f"Ошибка при получении вакансий: {str(e)}",
@@ -308,12 +321,17 @@ async def analyze_vacancies_with_progress(vacancies: List[Dict], technology: str
     total_vacancies = len(vacancies)
     processed = 0
     
+    print(f"Начинаем анализ {total_vacancies} вакансий на технологию: {technology}")
+    
     await manager.send_message({
         "stage": "analyzing",
         "message": f"Анализируем вакансии на наличие технологии '{technology}'...",
         "progress": 50,
         "total": total_vacancies,
-        "processed": 0
+        "processed": 0,
+        "found_with_tech": 0,
+        "real_requests": 0,
+        "cached_requests": 0
     }, websocket)
     
     with concurrent.futures.ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
@@ -415,51 +433,74 @@ async def websocket_analyze(websocket: WebSocket):
         else:
             search_query = vacancy_title
         
-        # Получаем вакансии с прогрессом
-        vacancies = await get_vacancies_with_progress(search_query, area, max_pages, websocket)
-        
-        if not vacancies:
+        try:
+            # Получаем вакансии с прогрессом
+            vacancies = await get_vacancies_with_progress(search_query, area, max_pages, websocket)
+            
+            if not vacancies:
+                await manager.send_message({
+                    "stage": "error",
+                    "message": "Вакансии не найдены",
+                    "progress": 0
+                }, websocket)
+                return
+            
+            # Анализируем вакансии с прогрессом
+            stats = await analyze_vacancies_with_progress(vacancies, technology, websocket)
+            
+            # Отправляем финальный результат
+            real_requests, cached_requests = get_request_count()
+            
+            result = {
+                "stage": "finished",
+                "data": {
+                    "vacancy_title": vacancy_title,
+                    "technology": technology,
+                    "total_vacancies": stats['total_vacancies'],
+                    "tech_vacancies": stats['tech_vacancies'],
+                    "tech_percentage": round(stats['tech_percentage'], 2),
+                    "vacancies_with_tech": stats['tech_vacancies_details'],
+                    "analysis_timestamp": datetime.now().isoformat(),
+                    "request_stats": {
+                        "real_requests": real_requests,
+                        "cached_requests": cached_requests,
+                        "total_requests": real_requests + cached_requests,
+                        "cache_size": len(description_cache),
+                        "cache_hit_rate": round((cached_requests / (real_requests + cached_requests) * 100) if (real_requests + cached_requests) > 0 else 0, 1)
+                    }
+                },
+                "progress": 100
+            }
+            
+            await manager.send_message(result, websocket)
+            
+        except Exception as e:
+            print(f"Ошибка при анализе: {e}")
+            import traceback
+            traceback.print_exc()
             await manager.send_message({
                 "stage": "error",
-                "message": "Вакансии не найдены"
+                "message": f"Ошибка при анализе: {str(e)}",
+                "progress": 0
             }, websocket)
-            return
-        
-        # Анализируем вакансии с прогрессом
-        stats = await analyze_vacancies_with_progress(vacancies, technology, websocket)
-        
-        # Отправляем финальный результат
-        real_requests, cached_requests = get_request_count()
-        
-        result = {
-            "stage": "finished",
-            "data": {
-                "vacancy_title": vacancy_title,
-                "technology": technology,
-                "total_vacancies": stats['total_vacancies'],
-                "tech_vacancies": stats['tech_vacancies'],
-                "tech_percentage": round(stats['tech_percentage'], 2),
-                "vacancies_with_tech": stats['tech_vacancies_details'],
-                "analysis_timestamp": datetime.now().isoformat(),
-                "request_stats": {
-                    "real_requests": real_requests,
-                    "cached_requests": cached_requests,
-                    "total_requests": real_requests + cached_requests,
-                    "cache_size": len(description_cache),
-                    "cache_hit_rate": round((cached_requests / (real_requests + cached_requests) * 100) if (real_requests + cached_requests) > 0 else 0, 1)
-                }
-            }
-        }
-        
-        await manager.send_message(result, websocket)
         
     except WebSocketDisconnect:
+        print("WebSocket отключен пользователем")
         manager.disconnect(websocket)
     except Exception as e:
-        await manager.send_message({
-            "stage": "error",
-            "message": str(e)
-        }, websocket)
+        print(f"Ошибка WebSocket: {e}")
+        import traceback
+        traceback.print_exc()
+        try:
+            await manager.send_message({
+                "stage": "error",
+                "message": f"Ошибка сервера: {str(e)}",
+                "progress": 0
+            }, websocket)
+        except:
+            pass
+    finally:
+        manager.disconnect(websocket)
 
 @app.get("/cache/stats")
 async def get_cache_statistics():

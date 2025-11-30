@@ -216,6 +216,8 @@
             background: #f8f9fa;
             border-radius: 15px;
             padding: 20px;
+            max-height: 600px;
+            overflow-y: auto;
         }
 
         .vacancies-list h3 {
@@ -310,11 +312,11 @@
                 <div class="form-row">
                     <div class="form-group">
                         <label for="vacancyTitle">Название вакансии</label>
-                        <input type="text" id="vacancyTitle" placeholder="Например: Data Engineer" required>
+                        <input type="text" id="vacancyTitle" placeholder="Например: Data Engineer" value="System Analyst" required>
                     </div>
                     <div class="form-group">
                         <label for="technology">Технология</label>
-                        <input type="text" id="technology" placeholder="Например: Python" required>
+                        <input type="text" id="technology" placeholder="Например: Python" value="UML" required>
                     </div>
                 </div>
 
@@ -326,7 +328,7 @@
                     </div>
                     <div class="form-group">
                         <label for="maxPages">Макс. страниц</label>
-                        <input type="number" id="maxPages" value="10" min="1" max="20">
+                        <input type="number" id="maxPages" value="3" min="1" max="20">
                     </div>
                 </div>
 
@@ -397,17 +399,27 @@
         });
 
         function startAnalysis(formData) {
-            // Показываем прогресс-бар
+            // Закрываем предыдущее соединение если есть
+            if (websocket && websocket.readyState === WebSocket.OPEN) {
+                websocket.close();
+            }
+
+            // Показываем прогресс-бар и сбрасываем его
             document.getElementById('progress').classList.remove('hidden');
             document.getElementById('results').classList.add('hidden');
             document.getElementById('error').classList.add('hidden');
             document.getElementById('submitBtn').disabled = true;
+            
+            // Сбрасываем прогресс
+            updateProgressBar(0, 'Подключение к серверу...');
+            document.getElementById('progressDetails').innerHTML = '';
 
             // Создаем WebSocket соединение
             websocket = new WebSocket(WS_URL);
 
             websocket.onopen = () => {
                 console.log('WebSocket соединение установлено');
+                updateProgressBar(0, 'Отправка запроса...');
                 websocket.send(JSON.stringify(formData));
             };
 
@@ -419,13 +431,16 @@
 
             websocket.onerror = (error) => {
                 console.error('WebSocket ошибка:', error);
-                showError('Ошибка соединения с сервером');
+                showError('Ошибка соединения с сервером. Убедитесь что сервер запущен.');
                 resetUI();
             };
 
-            websocket.onclose = () => {
-                console.log('WebSocket соединение закрыто');
-                document.getElementById('submitBtn').disabled = false;
+            websocket.onclose = (event) => {
+                console.log('WebSocket соединение закрыто', event);
+                // Активируем кнопку только если анализ завершен или была ошибка
+                if (!event.wasClean) {
+                    console.log('Соединение закрыто некорректно');
+                }
             };
         }
 
@@ -439,12 +454,17 @@
 
             // Обновляем детали прогресса в зависимости от этапа
             if (stage === 'fetching_vacancies') {
-                updateProgressDetails({
-                    'Найдено': message.found || '-',
-                    'Страниц': message.pages || '-',
-                    'Реальных запросов': message.real_requests || 0,
-                    'Из кэша': message.cached_requests || 0
-                });
+                const details = {};
+                if (message.found !== undefined) details['Найдено'] = message.found;
+                if (message.pages !== undefined) details['Страниц'] = message.pages;
+                if (message.real_requests !== undefined) details['Реальных запросов'] = message.real_requests;
+                if (message.cached_requests !== undefined) details['Из кэша'] = message.cached_requests;
+                updateProgressDetails(details);
+            } else if (stage === 'vacancies_loaded') {
+                const details = {
+                    'Загружено вакансий': message.total_vacancies || 0
+                };
+                updateProgressDetails(details);
             } else if (stage === 'analyzing') {
                 const details = {
                     'Обработано': `${message.processed || 0}/${message.total || 0}`,
@@ -453,19 +473,28 @@
 
                 if (message.real_requests !== undefined) {
                     details['Реальных запросов'] = message.real_requests;
-                    details['Из кэша'] = message.cached_requests;
+                    details['Из кэша'] = message.cached_requests || 0;
                     
-                    // Добавляем индикатор кэша
                     if (message.cache_hit_rate !== undefined) {
-                        const cacheHitRate = message.cache_hit_rate;
-                        details['Попадание в кэш'] = `${cacheHitRate}%`;
+                        details['Попадание в кэш'] = `${message.cache_hit_rate}%`;
                     }
                 }
 
                 updateProgressDetails(details);
+            } else if (stage === 'completed') {
+                updateProgressDetails({
+                    'Технология найдена в': `${message.tech_vacancies || 0}/${message.total_vacancies || 0}`,
+                    'Статус': '✅ Завершено'
+                });
             } else if (stage === 'finished') {
                 displayResults(message.data);
                 document.getElementById('progress').classList.add('hidden');
+                // Активируем кнопку
+                document.getElementById('submitBtn').disabled = false;
+                // Закрываем WebSocket
+                if (websocket) {
+                    websocket.close();
+                }
             } else if (stage === 'error') {
                 showError(msg);
                 resetUI();
@@ -491,7 +520,8 @@
                 
                 // Добавляем индикатор кэша если это процент попадания
                 if (label === 'Попадание в кэш') {
-                    const rate = parseFloat(value);
+                    const rateStr = String(value).replace('%', '');
+                    const rate = parseFloat(rateStr);
                     const cacheClass = rate >= 50 ? 'cache-indicator' : 'cache-indicator low';
                     detail.innerHTML = `
                         <div class="label">${label}</div>
@@ -555,6 +585,7 @@
             const errorDiv = document.getElementById('error');
             errorDiv.textContent = `Ошибка: ${message}`;
             errorDiv.classList.remove('hidden');
+            document.getElementById('progress').classList.add('hidden');
         }
 
         function resetUI() {
