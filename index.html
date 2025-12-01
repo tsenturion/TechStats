@@ -439,7 +439,7 @@
                         <label for="vacancyTitle">Название вакансии</label>
                         <div class="input-with-dropdown">
                             <input type="text" id="vacancyTitle"
-                                placeholder="Например: Data Engineer (2 клика для вывода ранее искомых)" required
+                                placeholder="Например: Data Engineer" required
                                 autocomplete="off">
                             <button type="button" class="dropdown-btn" id="vacancyDropdownBtn">▾</button>
                             <div class="dropdown-list hidden" id="vacancyDropdown"></div>
@@ -449,7 +449,7 @@
                         <label for="technology">Технология</label>
                         <div class="input-with-dropdown">
                             <input type="text" id="technology"
-                                placeholder="Например: Python (2 клика для вывода ранее искомых)" required
+                                placeholder="Например: Python" required
                                 autocomplete="off">
                             <button type="button" class="dropdown-btn" id="technologyDropdownBtn">▾</button>
                             <div class="dropdown-list hidden" id="technologyDropdown"></div>
@@ -558,7 +558,7 @@
 
         function populateVacancyDropdown() {
             try {
-                const storage = JSON.parse(localStorage.getItem('techstats_data')) || { vacancies: [] };
+                const storage = JSON.parse(localStorage.getItem('techstats_data'));
                 const list = document.getElementById('vacancyDropdown');
                 list.innerHTML = '';
 
@@ -588,7 +588,7 @@
 
         function populateTechnologyDropdown() {
             try {
-                const storage = JSON.parse(localStorage.getItem('techstats_data')) || { technologies: [] };
+                const storage = JSON.parse(localStorage.getItem('techstats_data'));
                 const list = document.getElementById('technologyDropdown');
                 list.innerHTML = '';
 
