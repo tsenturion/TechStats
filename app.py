@@ -2,7 +2,7 @@ from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from typing import List, Dict
-import requests
+import requests # type: ignore
 import time
 import re
 from threading import Lock
@@ -73,8 +73,8 @@ manager = ConnectionManager()
 
 # Модели данных
 class VacancySearchRequest(BaseModel):
-    vacancy_title: str = Field(..., description="Название вакансии", example="Data Engineer")
-    technology: str = Field(..., description="Технология для поиска", example="Python")
+    vacancy_title: str = Field(..., description="Название вакансии", examples=["Data Engineer"])
+    technology: str = Field(..., description="Технология для поиска", examples=["Python"])
     exact_search: bool = Field(default=True, description="Точный поиск по названию вакансии")
     area: int = Field(default=113, description="ID региона (113 - Россия)")
     max_pages: int = Field(default=10, description="Максимальное количество страниц для загрузки")
@@ -111,7 +111,7 @@ async def increment_request_counter(use_cache=False):
                 if time_since_last_request < (1.0 / MAX_REQUESTS_PER_SECOND):
                     sleep_time = (1.0 / MAX_REQUESTS_PER_SECOND) - time_since_last_request
                     await asyncio.sleep(sleep_time)
-                
+
                 last_request_time = time.time()
 
 def get_request_count():
