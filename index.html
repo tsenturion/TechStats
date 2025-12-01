@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="ru">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -66,6 +67,62 @@
             border-radius: 10px;
             font-size: 1em;
             transition: border-color 0.3s;
+        }
+
+        .input-with-dropdown {
+            position: relative;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .input-with-dropdown input[type="text"] {
+            flex: 1;
+            padding-right: 40px;
+        }
+
+        .dropdown-btn {
+            position: absolute;
+            right: 8px;
+            background: transparent;
+            border: none;
+            font-size: 1.1em;
+            cursor: pointer;
+            color: #667eea;
+            height: 32px;
+            width: 32px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 6px;
+        }
+
+        .dropdown-list {
+            position: absolute;
+            right: 0;
+            top: calc(100% + 8px);
+            background: white;
+            border: 1px solid #e6e6e6;
+            border-radius: 8px;
+            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+            min-width: 220px;
+            max-width: 360px;
+            max-height: 240px;
+            overflow: auto;
+            z-index: 40;
+            padding: 6px 6px;
+        }
+
+        .dropdown-list .dropdown-item {
+            padding: 8px 10px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 0.95em;
+            color: #333;
+        }
+
+        .dropdown-list .dropdown-item:hover {
+            background: #f1f5ff;
         }
 
         .form-group input:focus {
@@ -155,18 +212,21 @@
             left: 0;
             bottom: 0;
             right: 0;
-            background: linear-gradient(
-                90deg,
-                transparent,
-                rgba(255, 255, 255, 0.3),
-                transparent
-            );
+            background: linear-gradient(90deg,
+                    transparent,
+                    rgba(255, 255, 255, 0.3),
+                    transparent);
             animation: shimmer 2s infinite;
         }
 
         @keyframes shimmer {
-            0% { transform: translateX(-100%); }
-            100% { transform: translateX(100%); }
+            0% {
+                transform: translateX(-100%);
+            }
+
+            100% {
+                transform: translateX(100%);
+            }
         }
 
         .progress-message {
@@ -194,7 +254,7 @@
 
         .progress-detail:hover {
             transform: translateY(-2px);
-            box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
         }
 
         .progress-detail .label {
@@ -216,8 +276,15 @@
         }
 
         @keyframes pulse {
-            0%, 100% { opacity: 1; }
-            50% { opacity: 0.7; }
+
+            0%,
+            100% {
+                opacity: 1;
+            }
+
+            50% {
+                opacity: 0.7;
+            }
         }
 
         .progress-detail.active {
@@ -357,6 +424,7 @@
         }
     </style>
 </head>
+
 <body>
     <div class="container">
         <div class="header">
@@ -369,11 +437,23 @@
                 <div class="form-row">
                     <div class="form-group">
                         <label for="vacancyTitle">Название вакансии</label>
-                        <input type="text" id="vacancyTitle" placeholder="Например: Data Engineer" value="System Analyst" required>
+                        <div class="input-with-dropdown">
+                            <input type="text" id="vacancyTitle"
+                                placeholder="Например: Data Engineer (2 клика для вывода ранее искомых)" required
+                                autocomplete="off">
+                            <button type="button" class="dropdown-btn" id="vacancyDropdownBtn">▾</button>
+                            <div class="dropdown-list hidden" id="vacancyDropdown"></div>
+                        </div>
                     </div>
                     <div class="form-group">
                         <label for="technology">Технология</label>
-                        <input type="text" id="technology" placeholder="Например: Python" value="UML" required>
+                        <div class="input-with-dropdown">
+                            <input type="text" id="technology"
+                                placeholder="Например: Python (2 клика для вывода ранее искомых)" required
+                                autocomplete="off">
+                            <button type="button" class="dropdown-btn" id="technologyDropdownBtn">▾</button>
+                            <div class="dropdown-list hidden" id="technologyDropdown"></div>
+                        </div>
                     </div>
                 </div>
 
@@ -397,7 +477,8 @@
                 </div>
 
                 <details style="margin: 20px 0; padding: 15px; background: #f8f9fa; border-radius: 10px;">
-                    <summary style="cursor: pointer; font-weight: 600; color: #667eea;">⚙️ Расширенные настройки</summary>
+                    <summary style="cursor: pointer; font-weight: 600; color: #667eea;">⚙️ Расширенные настройки
+                    </summary>
                     <div style="margin-top: 15px;">
                         <div class="form-row">
                             <div class="form-group">
@@ -470,12 +551,87 @@
     <script>
         const WS_URL = 'ws://localhost:8000/ws/analyze';
         const SETTINGS_URL = 'http://localhost:8000/settings';
-        
+
         let websocket = null;
         let startTime = null;
         let progressInterval = null;
 
+        function populateVacancyDropdown() {
+            try {
+                const storage = JSON.parse(localStorage.getItem('techstats_data')) || { vacancies: [] };
+                const list = document.getElementById('vacancyDropdown');
+                list.innerHTML = '';
+
+                if (!storage.vacancies || storage.vacancies.length === 0) {
+                    const empty = document.createElement('div');
+                    empty.className = 'dropdown-item';
+                    empty.style.opacity = 0.7;
+                    empty.textContent = 'Нет сохранённых вакансий';
+                    list.appendChild(empty);
+                    return;
+                }
+
+                for (const v of storage.vacancies.slice().reverse()) {
+                    const item = document.createElement('div');
+                    item.className = 'dropdown-item';
+                    item.textContent = v;
+                    item.addEventListener('click', () => {
+                        document.getElementById('vacancyTitle').value = v;
+                        hideDropdown('vacancyDropdown');
+                    });
+                    list.appendChild(item);
+                }
+            } catch (e) {
+                console.error('populateVacancyDropdown:', e);
+            }
+        }
+
+        function populateTechnologyDropdown() {
+            try {
+                const storage = JSON.parse(localStorage.getItem('techstats_data')) || { technologies: [] };
+                const list = document.getElementById('technologyDropdown');
+                list.innerHTML = '';
+
+                if (!storage.technologies || storage.technologies.length === 0) {
+                    const empty = document.createElement('div');
+                    empty.className = 'dropdown-item';
+                    empty.style.opacity = 0.7;
+                    empty.textContent = 'Нет сохранённых технологий';
+                    list.appendChild(empty);
+                    return;
+                }
+
+                for (const t of storage.technologies.slice().reverse()) {
+                    const item = document.createElement('div');
+                    item.className = 'dropdown-item';
+                    item.textContent = t;
+                    item.addEventListener('click', () => {
+                        document.getElementById('technology').value = t;
+                        hideDropdown('technologyDropdown');
+                    });
+                    list.appendChild(item);
+                }
+            } catch (e) {
+                console.error('populateTechnologyDropdown:', e);
+            }
+        }
+
         window.onload = () => {
+            if (!localStorage.getItem('techstats_data'))
+                localStorage.setItem('techstats_data', JSON.stringify({
+                    vacancies: [],
+                    technologies: []
+                }));
+
+            try {
+                const data = JSON.parse(localStorage.getItem('techstats_data'));
+                if (!data.vacancies || !data.technologies || typeof data.vacancies != 'object' || typeof data.technologies != 'object')
+                    alert('Некорректная структура данных в локальном хранилище. Сохранённые вакансии не будут выведены на экран.');
+            } catch (e) {
+                alert('Нарушена целостность данных в локальном хранилище. Сохранённые вакансии не будут выведены на экран.');
+                console.error('Нарушена целостность данных в локальном хранилище:', e);
+            }
+
             fetch(SETTINGS_URL)
                 .then(response => response.json())
                 .then(data => {
@@ -487,7 +643,59 @@
                 .catch(error => {
                     console.error('Ошибка загрузки настроек:', error);
                 });
+
+            populateVacancyDropdown();
+            populateTechnologyDropdown();
+
+            document.getElementById('vacancyDropdownBtn').addEventListener('click', (e) => {
+                toggleDropdown('vacancyDropdown');
+            });
+            document.getElementById('technologyDropdownBtn').addEventListener('click', (e) => {
+                toggleDropdown('technologyDropdown');
+            });
+
+            document.addEventListener('click', (e) => {
+                const vacancyDropdown = document.getElementById('vacancyDropdown');
+                const techDropdown = document.getElementById('technologyDropdown');
+                const target = e.target;
+                if (!document.getElementById('vacancyDropdownBtn').contains(target) && !document.getElementById('vacancyTitle').contains(target)) {
+                    hideDropdown('vacancyDropdown');
+                }
+                if (!document.getElementById('technologyDropdownBtn').contains(target) && !document.getElementById('technology').contains(target)) {
+                    hideDropdown('technologyDropdown');
+                }
+            });
         };
+
+        function updateVacanciesList(vacancy) {
+            let local = JSON.parse(localStorage.getItem('techstats_data'));
+            if (!local.vacancies.includes(vacancy))
+                local.vacancies.push(vacancy);
+
+            localStorage.setItem('techstats_data', JSON.stringify(local));
+            populateVacancyDropdown();
+        }
+
+        function updateTechnologiesList(technology) {
+            let local = JSON.parse(localStorage.getItem('techstats_data'));
+            if (!local.technologies.includes(technology))
+                local.technologies.push(technology);
+
+            localStorage.setItem('techstats_data', JSON.stringify(local));
+            populateTechnologyDropdown();
+        }
+
+        function toggleDropdown(id) {
+            const el = document.getElementById(id);
+            if (!el) return;
+            el.classList.toggle('hidden');
+        }
+
+        function hideDropdown(id) {
+            const el = document.getElementById(id);
+            if (!el) return;
+            if (!el.classList.contains('hidden')) el.classList.add('hidden');
+        }
 
         document.getElementById('analysisForm').addEventListener('submit', async (e) => {
             e.preventDefault();
@@ -505,6 +713,8 @@
                 max_workers: parseInt(document.getElementById('maxWorkers').value)
             };
 
+            updateVacanciesList(formData.vacancy_title);
+            updateTechnologiesList(formData.technology);
             startAnalysis(formData);
         });
 
@@ -524,7 +734,7 @@
             document.getElementById('results').classList.add('hidden');
             document.getElementById('error').classList.add('hidden');
             document.getElementById('submitBtn').disabled = true;
-            
+
             // Сбрасываем прогресс
             updateProgressBar(0, 'Подключение к серверу...');
             document.getElementById('progressDetails').innerHTML = '';
@@ -588,17 +798,17 @@
                 updateProgressDetails(details);
             } else if (stage === 'analyzing') {
                 const details = {};
-                
+
                 if (message.processed !== undefined && message.total !== undefined) {
                     details['Обработано'] = `${message.processed}/${message.total}`;
                     const percentage = ((message.processed / message.total) * 100).toFixed(1);
                     details['Прогресс анализа'] = `${percentage}%`;
-                    
+
                     // Рассчитываем скорость обработки
                     const elapsed = (Date.now() - startTime) / 1000; // секунды
                     const speed = (message.processed / elapsed).toFixed(1);
                     details['Скорость'] = `${speed} вак/сек`;
-                    
+
                     // Оценка оставшегося времени
                     const remaining = message.total - message.processed;
                     const eta = (remaining / parseFloat(speed)).toFixed(0);
@@ -608,7 +818,7 @@
                         details['Осталось'] = `~${(eta / 60).toFixed(1)} мин`;
                     }
                 }
-                
+
                 if (message.found_with_tech !== undefined) {
                     details['Найдено с технологией'] = message.found_with_tech;
                 }
@@ -616,11 +826,11 @@
                 if (message.real_requests !== undefined) {
                     details['Реальных запросов'] = message.real_requests;
                 }
-                
+
                 if (message.cached_requests !== undefined) {
                     details['Из кэша'] = message.cached_requests;
                 }
-                
+
                 if (message.cache_hit_rate !== undefined) {
                     details['Попадание в кэш'] = `${message.cache_hit_rate}%`;
                 }
@@ -637,7 +847,7 @@
                 if (progressInterval) {
                     clearInterval(progressInterval);
                 }
-                
+
                 displayResults(message.data);
                 document.getElementById('progress').classList.add('hidden');
                 // Активируем кнопку
@@ -663,7 +873,7 @@
 
         function updateProgressDetails(details) {
             const container = document.getElementById('progressDetails');
-            
+
             // Получаем текущие значения для анимации изменений
             const currentValues = {};
             container.querySelectorAll('.progress-detail').forEach(detail => {
@@ -671,19 +881,19 @@
                 const value = detail.querySelector('.value').textContent;
                 currentValues[label] = value;
             });
-            
+
             container.innerHTML = '';
 
             for (const [label, value] of Object.entries(details)) {
                 const detail = document.createElement('div');
                 detail.className = 'progress-detail';
-                
+
                 // Проверяем изменилось ли значение
                 const hasChanged = currentValues[label] && currentValues[label] !== String(value);
                 if (hasChanged) {
                     detail.classList.add('active');
                 }
-                
+
                 // Добавляем индикатор кэша если это процент попадания
                 if (label === 'Попадание в кэш') {
                     const rateStr = String(value).replace('%', '');
@@ -701,7 +911,7 @@
                         <div class="value ${hasChanged ? 'updating' : ''}">${value}</div>
                     `;
                 }
-                
+
                 container.appendChild(detail);
             }
         }
@@ -710,13 +920,13 @@
             document.getElementById('totalVacancies').textContent = data.total_vacancies;
             document.getElementById('techVacancies').textContent = data.tech_vacancies;
             document.getElementById('percentage').textContent = data.tech_percentage.toFixed(2) + '%';
-            
+
             // Отображаем статистику по запросам с индикатором кэша
             const requestsCount = document.getElementById('requestsCount');
             const cacheHitRate = data.request_stats.cache_hit_rate;
             const totalRequests = data.request_stats.total_requests;
             const cachedRequests = data.request_stats.cached_requests;
-            
+
             requestsCount.innerHTML = `
                 ${totalRequests}
                 <div style="font-size: 0.5em; margin-top: 5px; opacity: 0.9;">
@@ -724,7 +934,7 @@
                 </div>
             `;
 
-            document.getElementById('listTitle').textContent = 
+            document.getElementById('listTitle').textContent =
                 `Вакансии с технологией "${data.technology}" (${data.tech_vacancies})`;
 
             const vacanciesList = document.getElementById('vacanciesList');
@@ -767,4 +977,5 @@
         }
     </script>
 </body>
+
 </html>
