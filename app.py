@@ -1,12 +1,15 @@
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
-from typing import List, Dict
+from typing import Optional, List, Dict
 import requests
 import time
 import re
 from threading import Lock
 from datetime import datetime, timedelta
+import concurrent.futures
+import asyncio
+import json
 import uvicorn
 import asyncio
 import functools
@@ -72,12 +75,23 @@ class ConnectionManager:
 manager = ConnectionManager()
 
 # Модели данных
+class GlobalSettings(BaseModel):
+    max_workers: int = Field(default=MAX_WORKERS, ge=1, le=10, description="Количество параллельных потоков")
+    request_delay: float = Field(default=REQUEST_DELAY, ge=0, le=1, description="Задержка между запросами (сек)")
+    max_requests_per_second: int = Field(default=MAX_REQUESTS_PER_SECOND, ge=1, le=20, description="Максимум запросов в секунду")
+    cache_ttl_hours: int = Field(default=CACHE_TTL_HOURS, ge=1, le=168, description="Время жизни кэша (часов)")
+
 class VacancySearchRequest(BaseModel):
     vacancy_title: str = Field(..., description="Название вакансии", example="Data Engineer")
     technology: str = Field(..., description="Технология для поиска", example="Python")
     exact_search: bool = Field(default=True, description="Точный поиск по названию вакансии")
     area: int = Field(default=113, description="ID региона (113 - Россия)")
-    max_pages: int = Field(default=10, description="Максимальное количество страниц для загрузки")
+    max_pages: int = Field(default=10, ge=1, le=20, description="Максимальное количество страниц для загрузки")
+    # Опциональные настройки (если не указаны, используются глобальные)
+    max_workers: Optional[int] = Field(None, ge=1, le=10, description="Переопределить количество потоков")
+    request_delay: Optional[float] = Field(None, ge=0, le=1, description="Переопределить задержку между запросами")
+    max_requests_per_second: Optional[int] = Field(None, ge=1, le=20, description="Переопределить лимит запросов")
+    cache_ttl_hours: Optional[int] = Field(None, ge=1, le=168, description="Переопределить TTL кэша")
 
 class VacancyInfo(BaseModel):
     id: str
@@ -335,7 +349,9 @@ async def analyze_vacancies_with_progress(vacancies: List[Dict], technology: str
         "cached_requests": 0
     }, websocket)
     
-    # Анализируем вакансии последовательно для корректной отправки прогресса
+    # await asyncio.sleep(0.1)
+    
+    # Анализируем вакансии последовательно
     for vacancy in vacancies:
         try:
             result = await check_vacancy_for_tech(vacancy, tech_pattern)
@@ -364,6 +380,9 @@ async def analyze_vacancies_with_progress(vacancies: List[Dict], technology: str
                     "cache_hit_rate": round(cache_hit_rate, 1)
                 }, websocket)
                 
+                # Даем время браузеру обработать сообщение
+                # await asyncio.sleep(0.05)
+                
         except Exception as e:
             print(f"Ошибка при анализе вакансии {vacancy.get('id', 'unknown')}: {e}")
             processed += 1
@@ -377,6 +396,8 @@ async def analyze_vacancies_with_progress(vacancies: List[Dict], technology: str
         "tech_vacancies": tech_vacancies,
         "total_vacancies": total_vacancies
     }, websocket)
+    
+    # await asyncio.sleep(0.1)
     
     return {
         'total_vacancies': total_vacancies,
@@ -393,6 +414,36 @@ async def root():
         "version": "1.0.0",
         "description": "API для анализа технологий в вакансиях с HH.ru",
         "docs": "/docs"
+    }
+
+@app.get("/settings")
+async def get_global_settings():
+    """Получить текущие глобальные настройки"""
+    return {
+        "max_workers": MAX_WORKERS,
+        "request_delay": REQUEST_DELAY,
+        "max_requests_per_second": MAX_REQUESTS_PER_SECOND,
+        "cache_ttl_hours": CACHE_TTL_HOURS
+    }
+
+@app.post("/settings")
+async def update_global_settings(settings: GlobalSettings):
+    """Обновить глобальные настройки"""
+    global MAX_WORKERS, REQUEST_DELAY, MAX_REQUESTS_PER_SECOND, CACHE_TTL_HOURS
+    
+    MAX_WORKERS = settings.max_workers
+    REQUEST_DELAY = settings.request_delay
+    MAX_REQUESTS_PER_SECOND = settings.max_requests_per_second
+    CACHE_TTL_HOURS = settings.cache_ttl_hours
+    
+    return {
+        "message": "Настройки успешно обновлены",
+        "settings": {
+            "max_workers": MAX_WORKERS,
+            "request_delay": REQUEST_DELAY,
+            "max_requests_per_second": MAX_REQUESTS_PER_SECOND,
+            "cache_ttl_hours": CACHE_TTL_HOURS
+        }
     }
 
 @app.get("/health")

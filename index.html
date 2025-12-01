@@ -309,6 +309,19 @@
             display: none;
         }
 
+        details summary {
+            user-select: none;
+            outline: none;
+        }
+
+        details[open] summary {
+            margin-bottom: 15px;
+        }
+
+        details summary:hover {
+            color: #764ba2;
+        }
+
         .cache-indicator {
             display: inline-flex;
             align-items: center;
@@ -383,6 +396,36 @@
                     </div>
                 </div>
 
+                <details style="margin: 20px 0; padding: 15px; background: #f8f9fa; border-radius: 10px;">
+                    <summary style="cursor: pointer; font-weight: 600; color: #667eea;">⚙️ Расширенные настройки</summary>
+                    <div style="margin-top: 15px;">
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="requestDelay">Задержка запросов (сек)</label>
+                                <input type="number" id="requestDelay" value="0.1" min="0" max="1" step="0.05">
+                                <small style="color: #666; font-size: 0.85em;">0.1 = быстро, 0.5 = безопасно</small>
+                            </div>
+                            <div class="form-group">
+                                <label for="maxRequestsPerSecond">Макс. запросов/сек</label>
+                                <input type="number" id="maxRequestsPerSecond" value="7" min="1" max="20">
+                                <small style="color: #666; font-size: 0.85em;">HH.ru лимит: не более 10</small>
+                            </div>
+                        </div>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="cacheTTL">Время жизни кэша (часов)</label>
+                                <input type="number" id="cacheTTL" value="24" min="1" max="168">
+                                <small style="color: #666; font-size: 0.85em;">24 = 1 день, 168 = неделя</small>
+                            </div>
+                            <div class="form-group">
+                                <label for="maxWorkers">Параллельных потоков</label>
+                                <input type="number" id="maxWorkers" value="5" min="1" max="10">
+                                <small style="color: #666; font-size: 0.85em;">Для будущих версий</small>
+                            </div>
+                        </div>
+                    </div>
+                </details>
+
                 <button type="submit" class="btn" id="submitBtn">Начать анализ</button>
             </form>
 
@@ -438,7 +481,12 @@
                 technology: document.getElementById('technology').value,
                 exact_search: document.getElementById('exactSearch').checked,
                 area: parseInt(document.getElementById('area').value),
-                max_pages: parseInt(document.getElementById('maxPages').value)
+                max_pages: parseInt(document.getElementById('maxPages').value),
+                // Расширенные настройки
+                request_delay: parseFloat(document.getElementById('requestDelay').value),
+                max_requests_per_second: parseInt(document.getElementById('maxRequestsPerSecond').value),
+                cache_ttl_hours: parseInt(document.getElementById('cacheTTL').value),
+                max_workers: parseInt(document.getElementById('maxWorkers').value)
             };
 
             startAnalysis(formData);
