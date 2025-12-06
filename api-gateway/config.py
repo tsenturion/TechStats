@@ -15,7 +15,7 @@ class Settings(BaseSettings):
     analyzer_service_url: str = "http://analyzer-service:8002"
     cache_service_url: str = "http://cache-service:8003"
     websocket_service_url: str = "http://websocket-service:8004"
-    stats_service_url: str = "http://stats-service:8005"
+    # stats_service_url: str = "http://stats-service:8005"
     
     # Redis для кэша и rate limiting
     redis_url: str = "redis://redis:6379"

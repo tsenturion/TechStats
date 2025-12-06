@@ -12,6 +12,7 @@ help:
 	@echo "  make logs-analyzer      - Показать логи Analyzer Service"
 	@echo "  make logs-cache         - Показать логи Cache Service"
 	@echo "  make logs-cache-cluster - Показать логи кластера кэша"
+	@echo "  make logs-websocket  - Показать логи WebSocket Service"
 	@echo "  make test               - Запустить тесты"
 	@echo "  make clean              - Очистить все (контейнеры, volumes)"
 	@echo "  make restart            - Перезапустить все сервисы"
@@ -128,3 +129,24 @@ test-cache:
 monitor-cache:
 	open http://localhost:3000/d/cache-service/cache-service-metrics  # Grafana
 	open http://localhost:9090/graph?g0.expr=cache_operations_total  # Prometheus
+
+logs-websocket:
+	docker-compose logs -f websocket-service
+
+# Запуск полной системы
+run-full:
+	docker-compose up -d api-gateway vacancy-service analyzer-service cache-service websocket-service redis
+
+# Бэкенд
+websocket-shell:
+	docker-compose exec websocket-service /bin/bash
+
+# Тестирование WebSocket
+test-websocket:
+	curl -X POST http://localhost:8004/api/v1/ws/sessions/test \
+		-H "Content-Type: application/json" \
+		-d '{"vacancy_title": "Python Developer", "technology": "Python"}'
+
+# Мониторинг соединений
+monitor-connections:
+	curl http://localhost:8004/api/v1/ws/connections

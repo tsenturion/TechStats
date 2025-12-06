@@ -282,6 +282,47 @@ services:
     command:
       - '--path.rootfs=/host'
 
+  websocket-service:
+    build: ./websocket-service
+    container_name: techstats-websocket-service
+    restart: unless-stopped
+    ports:
+      - "8004:8004"
+    environment:
+      - ENVIRONMENT=development
+      - REDIS_URL=redis://redis:6379
+      - ANALYZER_SERVICE_URL=http://analyzer-service:8002
+      - VACANCY_SERVICE_URL=http://vacancy-service:8001
+      - CACHE_SERVICE_URL=http://cache-service:8003
+      - WEBSOCKET_PING_INTERVAL=20
+      - WEBSOCKET_PING_TIMEOUT=30
+      - MAX_CONNECTIONS_PER_IP=10
+      - MAX_TOTAL_CONNECTIONS=1000
+      - CONNECTION_TIMEOUT=300
+      - SESSION_TTL_SECONDS=3600
+      - CLEANUP_INTERVAL_SECONDS=60
+      - PROGRESS_UPDATE_INTERVAL=0.5
+      - BATCH_SIZE_FOR_PROGRESS=10
+    volumes:
+      - ./websocket-service:/app
+      - ./websocket-service/logs:/app/logs
+    networks:
+      - techstats-network
+    depends_on:
+      redis:
+        condition: service_healthy
+      analyzer-service:
+        condition: service_healthy
+      vacancy-service:
+        condition: service_healthy
+      cache-service:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8004/api/v1/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
 volumes:
   redis-data:
   mongo-data:
