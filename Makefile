@@ -3,16 +3,17 @@
 
 help:
 	@echo "Доступные команды:"
-	@echo "  make build     - Собрать все сервисы"
-	@echo "  make up        - Запустить все сервисы в фоне"
-	@echo "  make up-dev    - Запустить с логами (разработка)"
-	@echo "  make down      - Остановить все сервисы"
-	@echo "  make logs      - Показать логи API Gateway"
-	@echo "  make logs-vacancy - Показать логи Vacancy Service"
-	@echo "  make test      - Запустить тесты"
-	@echo "  make clean     - Очистить все (контейнеры, volumes)"
-	@echo "  make restart   - Перезапустить все сервисы"
-	@echo "  make status    - Показать статус сервисов"
+	@echo "  make build           - Собрать все сервисы"
+	@echo "  make up              - Запустить все сервисы в фоне"
+	@echo "  make up-dev          - Запустить с логами (разработка)"
+	@echo "  make down            - Остановить все сервисы"
+	@echo "  make logs            - Показать логи API Gateway"
+	@echo "  make logs-vacancy    - Показать логи Vacancy Service"
+	@echo "  make logs-analyzer   - Показать логи Analyzer Service"
+	@echo "  make test            - Запустить тесты"
+	@echo "  make clean           - Очистить все (контейнеры, volumes)"
+	@echo "  make restart         - Перезапустить все сервисы"
+	@echo "  make status          - Показать статус сервисов"
 
 build:
 	docker-compose build
@@ -80,3 +81,18 @@ dev-vacancy:
 
 dev-api:
 	cd api-gateway && uvicorn main:app --reload --host 0.0.0.0 --port 8000
+
+logs-analyzer:
+	docker-compose logs -f analyzer-service
+
+# Запуск полной системы
+run-full:
+	docker-compose up -d api-gateway vacancy-service analyzer-service redis
+
+# Бэкенд
+analyzer-shell:
+	docker-compose exec analyzer-service /bin/bash
+
+# Тестирование
+test-analyzer:
+	docker-compose run --rm analyzer-service python -m pytest tests/

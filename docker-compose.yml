@@ -75,7 +75,7 @@ services:
       timeout: 10s
       retries: 3
 
-  # Analyzer Service (будет реализован далее)
+  # Analyzer Service
   analyzer-service:
     build: ./analyzer-service
     container_name: techstats-analyzer-service
@@ -86,8 +86,18 @@ services:
       - ENVIRONMENT=development
       - REDIS_URL=redis://redis:6379
       - VACANCY_SERVICE_URL=http://vacancy-service:8001
+      - MAX_WORKERS=5
+      - BATCH_SIZE=10
+      - ANALYSIS_CACHE_TTL_HOURS=24
+      - PATTERN_CACHE_TTL_HOURS=168
+      - ENABLE_STEMMING=true
+      - ENABLE_LEMMATIZATION=true
+      - REMOVE_STOPWORDS=true
+      - LANGUAGE=ru
     volumes:
       - ./analyzer-service:/app
+      - ./analyzer-service/logs:/app/logs
+      - ./analyzer-service/data:/app/data
     networks:
       - techstats-network
     depends_on:
@@ -96,7 +106,7 @@ services:
       vacancy-service:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8002/health"]
+      test: ["CMD", "curl", "-f", "http://localhost:8002/api/v1/health"]
       interval: 30s
       timeout: 10s
       retries: 3
