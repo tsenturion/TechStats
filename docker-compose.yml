@@ -2,37 +2,6 @@
 version: '3.8'
 
 services:
-  # API Gateway
-  api-gateway:
-    build: ./api-gateway
-    container_name: techstats-api-gateway
-    restart: unless-stopped
-    ports:
-      - "8000:8000"
-    volumes:
-      - ./api-gateway:/app
-      - ./api-gateway/logs:/app/logs
-    environment:
-      - ENVIRONMENT=development
-      - REDIS_URL=redis://redis:6379
-      - VACANCY_SERVICE_URL=http://vacancy-service:8001
-      - ANALYZER_SERVICE_URL=http://analyzer-service:8002
-      - CACHE_SERVICE_URL=http://cache-service:8003
-      - WEBSOCKET_SERVICE_URL=http://websocket-service:8004
-    depends_on:
-      - redis
-      - vacancy-service
-      - analyzer-service
-      - cache-service
-      - websocket-service
-    networks:
-      - techstats-network
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-
   # Redis для кэша и rate limiting
   redis:
     image: redis:7-alpine
@@ -42,7 +11,7 @@ services:
       - "6379:6379"
     volumes:
       - redis-data:/data
-    command: redis-server --appendonly yes
+    command: redis-server --appendonly yes --maxmemory 512mb --maxmemory-policy allkeys-lru
     networks:
       - techstats-network
     healthcheck:
@@ -51,7 +20,34 @@ services:
       timeout: 5s
       retries: 3
 
-  # Сервис вакансий
+  # API Gateway
+  api-gateway:
+    build: ./api-gateway
+    container_name: techstats-api-gateway
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      - ENVIRONMENT=development
+      - REDIS_URL=redis://redis:6379
+      - VACANCY_SERVICE_URL=http://vacancy-service:8001
+      - ANALYZER_SERVICE_URL=http://analyzer-service:8002
+      - CACHE_SERVICE_URL=http://cache-service:8003
+      - WEBSOCKET_SERVICE_URL=http://websocket-service:8004
+    volumes:
+      - ./api-gateway:/app
+    networks:
+      - techstats-network
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Vacancy Service
   vacancy-service:
     build: ./vacancy-service
     container_name: techstats-vacancy-service
@@ -62,14 +58,24 @@ services:
       - ENVIRONMENT=development
       - REDIS_URL=redis://redis:6379
       - HH_API_BASE_URL=https://api.hh.ru
+      - HH_RATE_LIMIT_PER_SECOND=7
+      - HH_RATE_LIMIT_PER_DAY=50000
+      - CACHE_TTL_HOURS=24
     volumes:
       - ./vacancy-service:/app
+      - ./vacancy-service/logs:/app/logs
     networks:
       - techstats-network
     depends_on:
-      - redis
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/api/v1/health/ready"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
 
-  # Сервис анализа
+  # Analyzer Service (будет реализован далее)
   analyzer-service:
     build: ./analyzer-service
     container_name: techstats-analyzer-service
@@ -85,10 +91,17 @@ services:
     networks:
       - techstats-network
     depends_on:
-      - redis
-      - vacancy-service
+      redis:
+        condition: service_healthy
+      vacancy-service:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8002/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
 
-  # Сервис кэширования
+  # Cache Service (будет реализован далее)
   cache-service:
     build: ./cache-service
     container_name: techstats-cache-service
@@ -103,9 +116,10 @@ services:
     networks:
       - techstats-network
     depends_on:
-      - redis
+      redis:
+        condition: service_healthy
 
-  # WebSocket сервис
+  # WebSocket Service (будет реализован далее)
   websocket-service:
     build: ./websocket-service
     container_name: techstats-websocket-service
@@ -121,8 +135,10 @@ services:
     networks:
       - techstats-network
     depends_on:
-      - redis
-      - analyzer-service
+      redis:
+        condition: service_healthy
+      analyzer-service:
+        condition: service_healthy
 
   # Prometheus для мониторинга
   prometheus:
@@ -162,22 +178,17 @@ services:
     depends_on:
       - prometheus
 
-  # Nginx для load balancing (опционально)
-  nginx:
-    image: nginx:alpine
-    container_name: techstats-nginx
+  # Node Exporter для системных метрик
+  node-exporter:
+    image: prom/node-exporter:latest
+    container_name: techstats-node-exporter
     restart: unless-stopped
     ports:
-      - "80:80"
-      - "443:443"
-    volumes:
-      - ./nginx/nginx.conf:/etc/nginx/nginx.conf
-      - ./nginx/conf.d:/etc/nginx/conf.d
-      - ./ssl:/etc/nginx/ssl
+      - "9100:9100"
     networks:
       - techstats-network
-    depends_on:
-      - api-gateway
+    command:
+      - '--path.rootfs=/host'
 
 volumes:
   redis-data:
