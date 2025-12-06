@@ -1,8 +1,8 @@
-# C:\Users\user\Desktop\TechStats\docker-compose.yml
+# Обновляем docker-compose.yml с Cache Service
 version: '3.8'
 
 services:
-  # Redis для кэша и rate limiting
+  # Redis для кэша
   redis:
     image: redis:7-alpine
     container_name: techstats-redis
@@ -20,7 +20,122 @@ services:
       timeout: 5s
       retries: 3
 
-  # API Gateway
+  # MongoDB для persistent cache (опционально)
+  mongo:
+    image: mongo:6
+    container_name: techstats-mongo
+    restart: unless-stopped
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo-data:/data/db
+    networks:
+      - techstats-network
+    command: mongod --quiet --logpath /dev/null
+    healthcheck:
+      test: echo 'db.runCommand("ping").ok' | mongosh localhost:27017/test --quiet
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Cache Service
+  cache-service:
+    build: ./cache-service
+    container_name: techstats-cache-service
+    restart: unless-stopped
+    ports:
+      - "8003:8003"
+    environment:
+      - ENVIRONMENT=development
+      - NODE_ID=cache-node-1
+      - REDIS_URL=redis://redis:6379
+      - MONGO_URL=mongodb://mongo:27017
+      - CACHE_BACKEND=redis
+      - CACHE_STRATEGY=lru
+      - DEFAULT_TTL_SECONDS=3600
+      - MAX_CACHE_SIZE_MB=1024
+      - CLEANUP_INTERVAL_SECONDS=300
+      - ENABLE_CLUSTERING=false
+      - CLUSTER_NODES=http://cache-node-1:8003,http://cache-node-2:8003,http://cache-node-3:8003
+      - API_RATE_LIMIT_PER_MINUTE=1000
+      - API_RATE_LIMIT_PER_HOUR=10000
+    volumes:
+      - ./cache-service:/app
+      - ./cache-service/logs:/app/logs
+    networks:
+      - techstats-network
+    depends_on:
+      redis:
+        condition: service_healthy
+      mongo:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8003/api/v1/health/ready"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Cache Service Node 2 (для тестирования кластера)
+  cache-service-2:
+    build: ./cache-service
+    container_name: techstats-cache-service-2
+    restart: unless-stopped
+    ports:
+      - "8004:8004"
+    environment:
+      - ENVIRONMENT=development
+      - NODE_ID=cache-node-2
+      - REDIS_URL=redis://redis:6379
+      - CACHE_BACKEND=redis
+      - CACHE_STRATEGY=lru
+      - DEFAULT_TTL_SECONDS=3600
+      - ENABLE_CLUSTERING=true
+      - CLUSTER_NODES=http://cache-node-1:8003,http://cache-node-2:8004,http://cache-node-3:8005
+      - PORT=8004
+    volumes:
+      - ./cache-service:/app
+    networks:
+      - techstats-network
+    depends_on:
+      - redis
+      - cache-service
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8004/api/v1/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Cache Service Node 3 (для тестирования кластера)
+  cache-service-3:
+    build: ./cache-service
+    container_name: techstats-cache-service-3
+    restart: unless-stopped
+    ports:
+      - "8005:8005"
+    environment:
+      - ENVIRONMENT=development
+      - NODE_ID=cache-node-3
+      - REDIS_URL=redis://redis:6379
+      - CACHE_BACKEND=redis
+      - CACHE_STRATEGY=lru
+      - DEFAULT_TTL_SECONDS=3600
+      - ENABLE_CLUSTERING=true
+      - CLUSTER_NODES=http://cache-node-1:8003,http://cache-node-2:8004,http://cache-node-3:8005
+      - PORT=8005
+    volumes:
+      - ./cache-service:/app
+    networks:
+      - techstats-network
+    depends_on:
+      - redis
+      - cache-service
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8005/api/v1/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # API Gateway (обновляем зависимости)
   api-gateway:
     build: ./api-gateway
     container_name: techstats-api-gateway
@@ -40,6 +155,12 @@ services:
       - techstats-network
     depends_on:
       redis:
+        condition: service_healthy
+      vacancy-service:
+        condition: service_healthy
+      analyzer-service:
+        condition: service_healthy
+      cache-service:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
@@ -111,45 +232,6 @@ services:
       timeout: 10s
       retries: 3
 
-  # Cache Service (будет реализован далее)
-  cache-service:
-    build: ./cache-service
-    container_name: techstats-cache-service
-    restart: unless-stopped
-    ports:
-      - "8003:8003"
-    environment:
-      - ENVIRONMENT=development
-      - REDIS_URL=redis://redis:6379
-    volumes:
-      - ./cache-service:/app
-    networks:
-      - techstats-network
-    depends_on:
-      redis:
-        condition: service_healthy
-
-  # WebSocket Service (будет реализован далее)
-  websocket-service:
-    build: ./websocket-service
-    container_name: techstats-websocket-service
-    restart: unless-stopped
-    ports:
-      - "8004:8004"
-    environment:
-      - ENVIRONMENT=development
-      - REDIS_URL=redis://redis:6379
-      - ANALYZER_SERVICE_URL=http://analyzer-service:8002
-    volumes:
-      - ./websocket-service:/app
-    networks:
-      - techstats-network
-    depends_on:
-      redis:
-        condition: service_healthy
-      analyzer-service:
-        condition: service_healthy
-
   # Prometheus для мониторинга
   prometheus:
     image: prom/prometheus:latest
@@ -202,6 +284,7 @@ services:
 
 volumes:
   redis-data:
+  mongo-data:
   prometheus-data:
   grafana-data:
 

@@ -38,6 +38,22 @@ scrape_configs:
         labels:
           service: 'node'
 
+- job_name: 'cache-service'
+    static_configs:
+      - targets: ['cache-service:8003', 'cache-service-2:8004', 'cache-service-3:8005']
+        labels:
+          service: 'cache-service'
+          cluster: 'techstats'
+    metrics_path: '/api/v1/metrics'
+    scrape_interval: 15s
+    scrape_timeout: 10s
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: instance
+      - source_labels: [__address__]
+        regex: '([^:]+):\d+'
+        target_label: node
+        
 alerting:
   alertmanagers:
     - static_configs:
