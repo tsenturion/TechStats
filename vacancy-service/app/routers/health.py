@@ -94,6 +94,14 @@ async def health_check():
     return health_status
 
 
+@router.get("/health/live")
+async def liveness_probe():
+    """
+    Проверка активности сервиса
+    """
+    return {"status": "alive", "service": "vacancy-service", "timestamp": datetime.now().isoformat()}
+
+
 @router.get("/health/detailed")
 async def detailed_health_check():
     """
@@ -163,6 +171,7 @@ async def readiness_probe():
     if health["status"] in ["healthy", "degraded"]:
         return {"status": "ready", "service": "vacancy-service"}
     else:
+        from fastapi import HTTPException
         raise HTTPException(status_code=503, detail="Service not ready")
 
 

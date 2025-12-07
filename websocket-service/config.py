@@ -7,7 +7,7 @@ import os
 class Settings(BaseSettings):
     # Основные настройки
     app_name: str = "TechStats WebSocket Service"
-    debug: bool = False
+    debug: bool = True
     environment: str = "production"
     version: str = "1.0.0"
     

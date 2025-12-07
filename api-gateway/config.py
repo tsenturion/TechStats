@@ -7,7 +7,7 @@ import os
 class Settings(BaseSettings):
     # Основные настройки
     app_name: str = "TechStats API Gateway"
-    debug: bool = False
+    debug: bool = True
     environment: str = "production"
     
     # Настройки сервисов
