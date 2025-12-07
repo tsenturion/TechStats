@@ -88,10 +88,6 @@ dev-api:
 logs-analyzer:
 	docker-compose logs -f analyzer-service
 
-# Запуск полной системы
-run-full:
-	docker-compose up -d api-gateway vacancy-service analyzer-service redis
-
 # Бэкенд
 analyzer-shell:
 	docker-compose exec analyzer-service /bin/bash
