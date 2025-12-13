@@ -57,6 +57,7 @@ services:
       - CLEANUP_INTERVAL_SECONDS=300
       - ENABLE_CLUSTERING=false
       - CLUSTER_NODES=http://cache-node-1:8003,http://cache-node-2:8003,http://cache-node-3:8003
+      - REDIS_CLUSTER_NODES=redis://redis-1:6379,redis://redis-2:6379,redis://redis-3:6379
       - API_RATE_LIMIT_PER_MINUTE=1000
       - API_RATE_LIMIT_PER_HOUR=10000
     volumes:

@@ -160,11 +160,29 @@ class RedisBackend(CacheBackendInterface):
         try:
             if settings.cache_backend == CacheBackend.REDIS_CLUSTER:
                 # Redis Cluster
-                startup_nodes = [
-                    {"host": node.split("://")[1].split(":")[0], 
-                     "port": int(node.split("://")[1].split(":")[1])}
-                    for node in settings.redis_cluster_nodes
-                ]
+                cluster_nodes = settings.get_redis_cluster_nodes()
+                
+                if not cluster_nodes:
+                    logger.error("Redis cluster mode enabled but no nodes configured")
+                    raise ValueError("REDIS_CLUSTER_NODES environment variable is not set or empty")
+                
+                startup_nodes = []
+                for node in cluster_nodes:
+                    # Удаляем протокол если есть
+                    node_clean = node.replace("redis://", "").replace("http://", "")
+                    
+                    if ":" in node_clean:
+                        host, port = node_clean.split(":")
+                        startup_nodes.append({
+                            "host": host,
+                            "port": int(port)
+                        })
+                    else:
+                        logger.warning(f"Invalid node format: {node}, expected host:port")
+                
+                if not startup_nodes:
+                    raise ValueError("No valid Redis cluster nodes found")
+                
                 self.client = RedisCluster(
                     startup_nodes=startup_nodes,
                     decode_responses=False,
@@ -180,11 +198,11 @@ class RedisBackend(CacheBackendInterface):
                     health_check_interval=settings.redis_health_check_interval
                 )
                 logger.info("Redis client initialized", url=settings.redis_url)
-            
+
             # Тестовое подключение
             await self.client.ping()
             self.initialized = True
-            
+
         except Exception as e:
             logger.error("Failed to initialize Redis backend", error=str(e))
             raise

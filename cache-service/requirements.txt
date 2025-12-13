@@ -14,3 +14,4 @@ msgpack==1.0.7
 orjson==3.9.10
 python-multipart==0.0.6
 psutil==5.9.6
+aiohttp==3.13.2

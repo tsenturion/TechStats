@@ -40,7 +40,7 @@ class ClusterManager:
         if not settings.enable_clustering:
             logger.info("Clustering disabled, running in single-node mode")
             return
-        
+
         # Создаем информацию о текущей ноде
         self.self_node = ClusterNode(
             id=settings.node_id,
@@ -55,12 +55,14 @@ class ClusterManager:
                 "started_at": time.time()
             }
         )
-        
+
         # Добавляем себя в список нод
         self.nodes[settings.node_id] = self.self_node
-        
+
         # Добавляем другие ноды из конфигурации
-        for node_url in settings.cluster_nodes:
+        cluster_nodes = settings.get_cluster_nodes()
+        
+        for node_url in cluster_nodes:
             node_id = self._extract_node_id(node_url)
             if node_id != settings.node_id:  # Не добавляем себя
                 self.nodes[node_id] = ClusterNode(
@@ -72,14 +74,14 @@ class ClusterManager:
                     version="unknown",
                     metadata={}
                 )
-        
+
         # Строим consistent hash ring
         self._build_hash_ring()
-        
+
         # Запускаем проверку здоровья
         self.running = True
         self.health_check_task = asyncio.create_task(self._health_check_loop())
-        
+
         logger.info(
             "Cluster initialized",
             node_id=settings.node_id,

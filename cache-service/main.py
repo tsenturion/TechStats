@@ -60,10 +60,11 @@ async def lifespan(app: FastAPI):
     # Инициализация кластера (если включено)
     cluster_manager = None
     if settings.enable_clustering:
+        cluster_nodes = settings.get_cluster_nodes()
         cluster_manager = ClusterManager()
         await cluster_manager.initialize()
         app.state.cluster_manager = cluster_manager
-        logger.info("Cluster manager initialized", nodes=len(settings.cluster_nodes))
+        logger.info("Cluster manager initialized", nodes=len(cluster_nodes))
     
     # Инициализация метрик
     if settings.enable_prometheus:
