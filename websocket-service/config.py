@@ -1,7 +1,6 @@
 # C:\Users\user\Desktop\TechStats\websocket-service\config.py
 from pydantic_settings import BaseSettings
-from typing import List, Optional, Dict, Any
-import os
+from typing import List
 
 
 class Settings(BaseSettings):
@@ -48,6 +47,9 @@ class Settings(BaseSettings):
     
     # CORS
     cors_origins: List[str] = ["*"]
+
+    # Admin
+    admin_token: str = "admin_secret_token"
     
     class Config:
         env_file = ".env"

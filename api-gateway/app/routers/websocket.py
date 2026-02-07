@@ -1,10 +1,12 @@
-# C:\Users\user\Desktop\TechStats\api-gateway\app\routers\websocket.py
-import json
 import asyncio
-from typing import Dict, Any
+import json
+import time
+from typing import Any, Dict
+
 import httpx
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 import structlog
+import websockets
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 from config import settings
 from app.websocket_manager import websocket_manager
@@ -13,146 +15,99 @@ router = APIRouter()
 logger = structlog.get_logger()
 
 
+def _to_ws_url(base_url: str) -> str:
+    if base_url.startswith("https://"):
+        return "wss://" + base_url[len("https://") :]
+    if base_url.startswith("http://"):
+        return "ws://" + base_url[len("http://") :]
+    return base_url
+
+
 @router.websocket("/ws/analyze")
 async def websocket_analyze(websocket: WebSocket):
-    """
-    WebSocket endpoint для анализа с прогрессом в реальном времени
-    """
     await websocket.accept()
-    
+
     try:
-        # Получение параметров запроса
-        data = await websocket.receive_json()
-        
-        # Валидация
-        required_fields = ["vacancy_title", "technology"]
-        for field in required_fields:
-            if field not in data:
-                await websocket.send_json({
-                    "error": f"Missing required field: {field}",
-                    "stage": "error"
-                })
-                return
-        
-        # Подключение к WebSocket сервису
-        async with httpx.AsyncClient() as client:
-            try:
-                # Отправляем запрос в WebSocket сервис
-                async with client.stream(
-                    "POST",
-                    f"{settings.websocket_service_url}/api/v1/ws/proxy",
-                    json=data,
-                    timeout=30.0
-                ) as response:
-                    
-                    if response.status_code != 200:
-                        error_data = await response.json()
-                        await websocket.send_json({
-                            "error": error_data.get("detail", "WebSocket service error"),
-                            "stage": "error"
-                        })
-                        return
-                    
-                    # Проксирование сообщений между клиентом и сервисом
-                    async for chunk in response.aiter_bytes():
-                        try:
-                            message = json.loads(chunk.decode())
-                            await websocket.send_json(message)
-                            
-                            # Если анализ завершен, выходим
-                            if message.get("stage") == "finished":
-                                break
-                                
-                        except json.JSONDecodeError:
-                            logger.warning("Failed to parse WebSocket message", chunk=chunk)
-                        
-            except httpx.TimeoutException:
-                await websocket.send_json({
-                    "error": "WebSocket service timeout",
-                    "stage": "error"
-                })
-            except Exception as e:
-                logger.error("WebSocket proxy error", error=str(e))
-                await websocket.send_json({
-                    "error": f"WebSocket error: {str(e)}",
-                    "stage": "error"
-                })
-                
+        payload = await websocket.receive_json()
     except WebSocketDisconnect:
-        logger.info("WebSocket disconnected by client")
-    except json.JSONDecodeError:
-        await websocket.send_json({
-            "error": "Invalid JSON received",
-            "stage": "error"
-        })
-    except Exception as e:
-        logger.error("WebSocket endpoint error", error=str(e))
-        try:
-            await websocket.send_json({
-                "error": f"Server error: {str(e)}",
-                "stage": "error"
-            })
-        except:
-            pass
+        return
+    except Exception:
+        await websocket.send_json({"type": "error", "message": "Invalid JSON payload"})
+        await websocket.close(code=1003)
+        return
+
+    required_fields = ("vacancy_title", "technology")
+    for field in required_fields:
+        if field not in payload:
+            await websocket.send_json({"type": "error", "message": f"Missing required field: {field}"})
+            await websocket.close(code=1008)
+            return
+
+    backend_url = f"{_to_ws_url(settings.websocket_service_url)}/api/v1/ws/analyze"
+
+    try:
+        async with websockets.connect(backend_url, ping_interval=20, ping_timeout=30) as backend_ws:
+            await backend_ws.send(json.dumps(payload, ensure_ascii=False))
+
+            while True:
+                raw_message = await backend_ws.recv()
+                message = json.loads(raw_message)
+                await websocket.send_json(message)
+
+                stage = message.get("stage")
+                message_type = message.get("type")
+                if stage in {"completed", "failed", "error", "cancelled"} or message_type in {"completed", "error"}:
+                    break
+
+    except Exception as exc:
+        logger.error("WebSocket proxy error", error=str(exc))
+        await websocket.send_json({"type": "error", "message": f"WebSocket proxy error: {str(exc)}"})
     finally:
         try:
             await websocket.close()
-        except:
+        except Exception:
             pass
 
 
 @router.websocket("/ws/metrics")
 async def websocket_metrics(websocket: WebSocket):
-    """
-    WebSocket для передачи метрик в реальном времени
-    """
     await websocket.accept()
-    
+    await websocket_manager.connect(websocket)
+
     try:
-        # Регистрация подключения
-        connection_id = await websocket_manager.connect(websocket)
-        
-        # Отправка метрик каждые 5 секунд
         while True:
-            metrics = {
+            data = {
                 "connections": websocket_manager.active_connections_count(),
-                "timestamp": asyncio.get_event_loop().time(),
+                "timestamp": time.time(),
                 "services": {
                     "vacancy": await check_service_health(settings.vacancy_service_url),
                     "analyzer": await check_service_health(settings.analyzer_service_url),
                     "cache": await check_service_health(settings.cache_service_url),
-                }
+                    "websocket": await check_service_health(settings.websocket_service_url),
+                },
             }
-            
-            await websocket.send_json({
-                "type": "metrics",
-                "data": metrics
-            })
-            
+            await websocket.send_json({"type": "metrics", "data": data})
             await asyncio.sleep(5)
-            
     except WebSocketDisconnect:
+        pass
+    except Exception as exc:
+        logger.error("Metrics WebSocket error", error=str(exc))
+    finally:
         await websocket_manager.disconnect(websocket)
-    except Exception as e:
-        logger.error("Metrics WebSocket error", error=str(e))
         try:
             await websocket.close()
-        except:
+        except Exception:
             pass
 
 
 async def check_service_health(url: str) -> Dict[str, Any]:
-    """Проверка здоровья сервиса"""
     try:
         async with httpx.AsyncClient(timeout=2.0) as client:
-            response = await client.get(f"{url}/health")
+            response = await client.get(f"{url}/api/v1/health")
             return {
                 "status": "healthy" if response.status_code == 200 else "unhealthy",
                 "response_time": response.elapsed.total_seconds(),
-                "status_code": response.status_code
+                "status_code": response.status_code,
             }
-    except Exception as e:
-        return {
-            "status": "unavailable",
-            "error": str(e)
-        }
+    except Exception as exc:
+        return {"status": "unavailable", "error": str(exc)}

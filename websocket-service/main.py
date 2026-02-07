@@ -2,19 +2,18 @@
 import asyncio
 import time
 from contextlib import asynccontextmanager
-from typing import Dict, Any, List
+from typing import Dict, Any
 import signal
 import sys
 
 import httpx
 import redis.asyncio as redis
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
 import structlog
 import uvicorn
-from prometheus_client import Counter, Histogram, Gauge, generate_latest
+from prometheus_client import Counter, Histogram, Gauge
 
 from config import settings
 from app.middleware import RequestLoggingMiddleware, WebSocketMiddleware
@@ -22,7 +21,6 @@ from app.routers import websocket_router, health, metrics, admin
 from app.connection_manager import ConnectionManager
 from app.session_store import SessionStore
 from app.analysis_proxy import AnalysisProxy
-from app.metrics import setup_metrics
 
 # Настройка логирования
 logger = structlog.get_logger()
@@ -289,7 +287,7 @@ async def websocket_endpoint(websocket: WebSocket):
                     try:
                         await websocket.send_json({"type": "ping", "timestamp": time.time()})
                         continue
-                    except:
+                    except Exception:
                         # Соединение разорвано
                         break
                 
@@ -324,7 +322,7 @@ async def websocket_endpoint(websocket: WebSocket):
                     "type": "error",
                     "message": f"Internal server error: {str(e)}"
                 })
-            except:
+            except Exception:
                 pass
             
     except Exception as e:
@@ -333,7 +331,7 @@ async def websocket_endpoint(websocket: WebSocket):
         
     finally:
         # Закрытие соединения
-        connection_manager.disconnect(websocket)
+        await connection_manager.disconnect(websocket)
         ACTIVE_CONNECTIONS.dec()
         
         logger.info(

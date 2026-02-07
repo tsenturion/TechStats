@@ -16,3 +16,5 @@ orjson==3.9.10
 python-jose[cryptography]==3.3.0
 passlib[bcrypt]==1.7.4
 psutil==5.9.6
+pytest==8.3.5
+pytest-asyncio==0.24.0

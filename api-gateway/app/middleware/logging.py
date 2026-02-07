@@ -1,66 +1,81 @@
-# C:\Users\user\Desktop\TechStats\api-gateway\app\middleware\logging.py
-import time
-import uuid
-from fastapi import Request
-from starlette.middleware.base import BaseHTTPMiddleware
-from starlette.responses import Response
+from typing import Dict
+
 import structlog
+from fastapi import Request
+from jose import JWTError, jwt
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.responses import JSONResponse
+
+from config import settings
+from shared.middleware import BaseRequestLoggingMiddleware, BaseResponseTimeMiddleware
 
 logger = structlog.get_logger()
 
 
-class RequestLoggingMiddleware(BaseHTTPMiddleware):
-    """Middleware для логирования запросов"""
-    
+class RequestLoggingMiddleware(BaseRequestLoggingMiddleware):
+    service_name = "api-gateway"
+
+
+class ResponseTimeMiddleware(BaseResponseTimeMiddleware):
+    service_name = "api-gateway"
+    slow_threshold_seconds = 2.0
+    slow_message = "Slow API Gateway request detected"
+
+
+class AuthenticationMiddleware(BaseHTTPMiddleware):
+    """
+    Lightweight auth middleware for protected gateway routes.
+    Public routes and websockets are excluded.
+    """
+
     async def dispatch(self, request: Request, call_next):
-        # Генерация уникального ID запроса
-        request_id = str(uuid.uuid4())
-        request.state.request_id = request_id
-        
-        # Логирование начала запроса
-        start_time = time.time()
-        
-        logger.info(
-            "Request started",
-            request_id=request_id,
-            method=request.method,
-            url=str(request.url),
-            client_ip=request.client.host if request.client else None,
-            user_agent=request.headers.get("user-agent")
+        path = request.url.path
+
+        public_prefixes = (
+            "/",
+            "/docs",
+            "/redoc",
+            "/openapi.json",
+            "/api/v1/health",
+            "/api/v1/metrics",
+            "/ws/",
         )
-        
-        # Обработка запроса
+        if path.startswith(public_prefixes):
+            return await call_next(request)
+
+        auth_header = request.headers.get("Authorization")
+        if not auth_header:
+            return await call_next(request)
+
         try:
-            response = await call_next(request)
-            process_time = time.time() - start_time
-            
-            # Логирование завершения запроса
-            logger.info(
-                "Request completed",
-                request_id=request_id,
-                method=request.method,
-                url=str(request.url),
-                status_code=response.status_code,
-                process_time=process_time
-            )
-            
-            # Добавление заголовков для трассировки
-            response.headers["X-Request-ID"] = request_id
-            response.headers["X-Process-Time"] = str(process_time)
-            
-            return response
-            
-        except Exception as e:
-            process_time = time.time() - start_time
-            
-            # Логирование ошибки
-            logger.error(
-                "Request failed",
-                request_id=request_id,
-                method=request.method,
-                url=str(request.url),
-                error=str(e),
-                process_time=process_time
-            )
-            
-            raise
+            scheme, token = auth_header.split(" ", 1)
+        except ValueError:
+            return JSONResponse(status_code=401, content={"detail": "Invalid authorization header"})
+
+        if scheme.lower() != "bearer":
+            return JSONResponse(status_code=401, content={"detail": "Unsupported auth scheme"})
+
+        try:
+            payload = jwt.decode(token, settings.jwt_secret_key, algorithms=[settings.jwt_algorithm])
+            request.state.user = payload
+        except JWTError:
+            return JSONResponse(status_code=401, content={"detail": "Invalid token"})
+
+        return await call_next(request)
+
+
+class ServiceHealthMiddleware(BaseHTTPMiddleware):
+    """Attach downstream service endpoints to response headers for quick diagnostics."""
+
+    async def dispatch(self, request: Request, call_next):
+        response = await call_next(request)
+        response.headers["X-Services"] = ",".join(
+            [
+                settings.vacancy_service_url,
+                settings.analyzer_service_url,
+                settings.cache_service_url,
+                settings.websocket_service_url,
+            ]
+        )
+        return response
+

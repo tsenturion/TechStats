@@ -4,6 +4,7 @@ import time
 from typing import Optional, Dict, Any
 import structlog
 
+from config import settings, CacheBackend
 from app.cache_manager import CacheManager
 
 logger = structlog.get_logger()

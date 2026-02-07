@@ -1,17 +1,17 @@
 # C:\Users\user\Desktop\TechStats\analyzer-service\app\routers\analyze.py
 import asyncio
 import time
-from typing import List, Dict, Any, Optional
+from typing import Dict, Any
 from uuid import uuid4
 import httpx
-from fastapi import APIRouter, HTTPException, Body, Query, BackgroundTasks, Request
-from fastapi.responses import JSONResponse
+from fastapi import APIRouter, HTTPException, Body, Query, BackgroundTasks, Request, Depends
 import structlog
 
 from config import settings
 from app.cache import cache_manager
 from app.analyzer import PatternMatcher
 from app.tech_patterns import TechPatternsLoader
+from app.analysis_store import analysis_store
 
 router = APIRouter()
 logger = structlog.get_logger()
@@ -35,248 +35,230 @@ async def get_vacancy_client(request: Request) -> httpx.AsyncClient:
     return request.app.state.vacancy_client
 
 
-@router.post("/analyze")
-async def analyze_vacancies(
-    request: Request,
-    analysis_request: Dict[str, Any] = Body(...),
-    pattern_matcher: PatternMatcher = Depends(get_pattern_matcher),
-    vacancy_client: httpx.AsyncClient = Depends(get_vacancy_client),
-    use_cache: bool = Query(True, description="Использовать кэш")
+async def _fetch_vacancy_ids(
+    vacancy_client: httpx.AsyncClient,
+    search_query: str,
+    area: int,
+    per_page: int,
+    exact_search: bool,
+    use_cache: bool,
+    max_pages: int,
 ):
-    """
-    Анализ вакансий на наличие технологии
-    """
+    all_items = []
+    first_response = await vacancy_client.get(
+        "/api/v1/search",
+        params={
+            "query": search_query,
+            "area": area,
+            "page": 0,
+            "per_page": per_page,
+            "search_field": "name",
+            "exact_search": exact_search,
+            "use_cache": use_cache,
+        },
+    )
+    if first_response.status_code != 200:
+        raise HTTPException(status_code=first_response.status_code, detail=f"Vacancy service error: {first_response.text}")
+
+    first_data = first_response.json()
+    all_items.extend(first_data.get("items", []))
+    total_pages = min(max_pages, int(first_data.get("pages", 1)))
+
+    if total_pages > 1:
+        tasks = []
+        for page in range(1, total_pages):
+            tasks.append(
+                vacancy_client.get(
+                    "/api/v1/search",
+                    params={
+                        "query": search_query,
+                        "area": area,
+                        "page": page,
+                        "per_page": per_page,
+                        "search_field": "name",
+                        "exact_search": exact_search,
+                        "use_cache": use_cache,
+                    },
+                )
+            )
+        pages = await asyncio.gather(*tasks, return_exceptions=True)
+        for page_response in pages:
+            if isinstance(page_response, Exception):
+                continue
+            if page_response.status_code == 200:
+                all_items.extend(page_response.json().get("items", []))
+
+    unique_ids = []
+    seen = set()
+    for item in all_items:
+        vacancy_id = item.get("id")
+        if vacancy_id and vacancy_id not in seen:
+            seen.add(vacancy_id)
+            unique_ids.append(vacancy_id)
+    return unique_ids
+
+
+async def _perform_analysis(
+    analysis_request: Dict[str, Any],
+    pattern_matcher: PatternMatcher,
+    vacancy_client: httpx.AsyncClient,
+    use_cache: bool,
+) -> Dict[str, Any]:
     start_time = time.time()
-    
-    # Валидация запроса
     required_fields = ["vacancy_title", "technology"]
     for field in required_fields:
         if field not in analysis_request:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Missing required field: {field}"
-            )
-    
+            raise HTTPException(status_code=400, detail=f"Missing required field: {field}")
+
     vacancy_title = analysis_request["vacancy_title"]
     technology = analysis_request["technology"]
     exact_search = analysis_request.get("exact_search", True)
     area = analysis_request.get("area", 113)
     max_pages = analysis_request.get("max_pages", 10)
     per_page = analysis_request.get("per_page", 100)
-    
-    # Формирование поискового запроса
     search_query = f'"{vacancy_title}"' if exact_search else vacancy_title
-    
-    try:
-        # 1. Поиск вакансий через vacancy service
-        logger.info(
-            "Starting analysis",
-            vacancy_title=vacancy_title,
-            technology=technology,
-            exact_search=exact_search
-        )
-        
-        search_response = await vacancy_client.get(
-            "/api/v1/search",
-            params={
-                "query": search_query,
-                "area": area,
-                "page": 0,
-                "per_page": per_page,
-                "search_field": "name",
-                "exact_search": exact_search,
-                "use_cache": use_cache
-            }
-        )
-        
-        if search_response.status_code != 200:
-            raise HTTPException(
-                status_code=search_response.status_code,
-                detail=f"Vacancy service error: {search_response.text}"
-            )
-        
-        search_data = search_response.json()
-        vacancies = search_data.get("items", [])
-        
-        if not vacancies:
-            return {
-                "total_vacancies": 0,
-                "tech_vacancies": 0,
-                "tech_percentage": 0,
-                "vacancies_with_tech": [],
-                "request_stats": {
-                    "real_requests": 1,
-                    "cached_requests": 0,
-                    "total_requests": 1
-                }
-            }
-        
-        total_vacancies = len(vacancies)
-        vacancy_ids = [v.get("id") for v in vacancies if v.get("id")]
-        
-        # 2. Проверка кэша для всего набора
-        cached_result = None
-        if use_cache:
-            cached_result = await cache_manager.get_analysis_result(
-                vacancy_ids,
-                technology,
-                exact_search
-            )
-            
-            if cached_result:
-                logger.info(
-                    "Analysis result from cache",
-                    total_vacancies=total_vacancies,
-                    tech_vacancies=cached_result.get("tech_vacancies", 0)
-                )
-                
-                # Добавляем статистику запросов
-                cached_result["request_stats"] = {
-                    "real_requests": 1,  # Только поиск вакансий
-                    "cached_requests": total_vacancies,  # Все анализы из кэша
-                    "total_requests": total_vacancies + 1,
-                    "cache_hit_rate": 100.0
-                }
-                
-                return cached_result
-        
-        # 3. Пакетное получение детальной информации о вакансиях
-        batch_response = await vacancy_client.post(
-            "/api/v1/vacancies/batch",
-            json={"vacancy_ids": vacancy_ids},
-            params={"use_cache": use_cache}
-        )
-        
-        if batch_response.status_code != 200:
-            raise HTTPException(
-                status_code=batch_response.status_code,
-                detail=f"Batch fetch error: {batch_response.text}"
-            )
-        
-        batch_data = batch_response.json()
-        detailed_vacancies = batch_data.get("vacancies", [])
-        
-        # 4. Проверка кэша для отдельных вакансий
-        cached_analyses = {}
-        vacancies_to_analyze = []
-        
-        if use_cache:
-            cached_analyses = await cache_manager.get_batch_analysis(
-                vacancy_ids,
-                technology,
-                exact_search
-            )
-            
-            for vacancy in detailed_vacancies:
-                vacancy_id = vacancy.get("id")
-                if vacancy_id in cached_analyses and cached_analyses[vacancy_id]:
-                    # Анализ уже в кэше
-                    cached_analyses[vacancy_id]["from_cache"] = True
-                else:
-                    # Нужно проанализировать
-                    vacancies_to_analyze.append(vacancy)
-        else:
-            vacancies_to_analyze = detailed_vacancies
-        
-        # 5. Анализ вакансий, которых нет в кэше
-        analysis_results = []
-        if vacancies_to_analyze:
-            logger.info(
-                "Analyzing vacancies",
-                total=len(vacancies_to_analyze),
-                from_cache=len(cached_analyses)
-            )
-            
-            analysis_results = await pattern_matcher.analyze_vacancies_batch(
-                vacancies_to_analyze,
-                technology,
-                exact_search,
-                batch_size=settings.batch_size
-            )
-            
-            # Кэширование новых результатов
-            if use_cache:
-                await cache_manager.cache_batch_analysis(
-                    analysis_results,
-                    technology,
-                    exact_search
-                )
-        
-        # 6. Объединение результатов
-        all_results = list(cached_analyses.values()) + analysis_results
-        
-        # Фильтрация вакансий с технологией
-        vacancies_with_tech = []
-        for result in all_results:
-            if result.get("has_technology"):
-                vacancies_with_tech.append({
-                    "id": result.get("vacancy_id"),
-                    "name": result.get("vacancy_name"),
-                    "url": result.get("vacancy_url"),
-                    "match_count": result.get("match_count", 0)
-                })
-        
-        tech_vacancies = len(vacancies_with_tech)
-        tech_percentage = (tech_vacancies / total_vacancies * 100) if total_vacancies > 0 else 0
-        
-        # 7. Формирование финального результата
-        final_result = {
+
+    vacancy_ids = await _fetch_vacancy_ids(
+        vacancy_client=vacancy_client,
+        search_query=search_query,
+        area=area,
+        per_page=per_page,
+        exact_search=exact_search,
+        use_cache=use_cache,
+        max_pages=max_pages,
+    )
+
+    if not vacancy_ids:
+        empty_result = {
             "vacancy_title": vacancy_title,
             "technology": technology,
             "exact_search": exact_search,
-            "total_vacancies": total_vacancies,
-            "tech_vacancies": tech_vacancies,
-            "tech_percentage": round(tech_percentage, 2),
-            "vacancies_with_tech": vacancies_with_tech,
-            "analysis_timestamp": time.time(),
-            "cache_info": {
-                "total_cached": len(cached_analyses),
-                "newly_analyzed": len(analysis_results),
-                "cache_usage_percentage": (len(cached_analyses) / total_vacancies * 100) if total_vacancies > 0 else 0
-            }
+            "total_vacancies": 0,
+            "tech_vacancies": 0,
+            "tech_percentage": 0,
+            "vacancies_with_tech": [],
+            "request_stats": {"real_requests": 1, "cached_requests": 0, "total_requests": 1, "cache_hit_rate": 0.0, "processing_time": 0.0},
         }
-        
-        # 8. Кэширование полного результата
+        await analysis_store.add_record(empty_result)
+        return empty_result
+
+    total_vacancies = len(vacancy_ids)
+
+    if use_cache:
+        cached_result = await cache_manager.get_analysis_result(vacancy_ids, technology, exact_search)
+        if cached_result:
+            cached_result["request_stats"] = {
+                "real_requests": 1,
+                "cached_requests": total_vacancies,
+                "total_requests": total_vacancies + 1,
+                "cache_hit_rate": 100.0,
+                "processing_time": round(time.time() - start_time, 3),
+            }
+            return cached_result
+
+    batch_response = await vacancy_client.post(
+        "/api/v1/vacancies/batch",
+        json={"vacancy_ids": vacancy_ids},
+        params={"use_cache": use_cache},
+    )
+    if batch_response.status_code != 200:
+        raise HTTPException(status_code=batch_response.status_code, detail=f"Batch fetch error: {batch_response.text}")
+
+    detailed_vacancies = batch_response.json().get("vacancies", [])
+    cached_analyses = {}
+    vacancies_to_analyze = []
+
+    if use_cache:
+        cached_analyses = await cache_manager.get_batch_analysis(vacancy_ids, technology, exact_search)
+        for vacancy in detailed_vacancies:
+            vacancy_id = vacancy.get("id")
+            if vacancy_id in cached_analyses and cached_analyses[vacancy_id]:
+                cached_analyses[vacancy_id]["from_cache"] = True
+            else:
+                vacancies_to_analyze.append(vacancy)
+    else:
+        vacancies_to_analyze = detailed_vacancies
+
+    analysis_results = []
+    if vacancies_to_analyze:
+        analysis_results = await pattern_matcher.analyze_vacancies_batch(
+            vacancies_to_analyze,
+            technology,
+            exact_search,
+            batch_size=settings.batch_size,
+        )
         if use_cache:
-            await cache_manager.cache_analysis_result(
-                vacancy_ids,
-                technology,
-                exact_search,
-                final_result
+            await cache_manager.cache_batch_analysis(analysis_results, technology, exact_search)
+
+    all_results = [item for item in list(cached_analyses.values()) + analysis_results if item]
+    vacancies_with_tech = []
+    for result in all_results:
+        if result.get("has_technology"):
+            vacancies_with_tech.append(
+                {
+                    "id": result.get("vacancy_id"),
+                    "name": result.get("vacancy_name"),
+                    "url": result.get("vacancy_url"),
+                    "match_count": result.get("match_count", 0),
+                }
             )
-        
-        # 9. Расчет статистики запросов
-        real_requests = 2  # Поиск + batch запрос
-        cached_requests = total_vacancies - len(vacancies_to_analyze)
-        total_requests = real_requests + cached_requests
-        cache_hit_rate = (cached_requests / total_requests * 100) if total_requests > 0 else 0
-        
-        final_result["request_stats"] = {
+
+    tech_vacancies = len(vacancies_with_tech)
+    tech_percentage = (tech_vacancies / total_vacancies * 100) if total_vacancies else 0
+    real_requests = min(max_pages, 1 + max_pages) + 1
+    cached_requests = total_vacancies - len(vacancies_to_analyze)
+    total_requests = real_requests + max(0, cached_requests)
+    cache_hit_rate = (cached_requests / total_requests * 100) if total_requests else 0
+
+    final_result = {
+        "vacancy_title": vacancy_title,
+        "technology": technology,
+        "exact_search": exact_search,
+        "total_vacancies": total_vacancies,
+        "tech_vacancies": tech_vacancies,
+        "tech_percentage": round(tech_percentage, 2),
+        "vacancies_with_tech": vacancies_with_tech,
+        "analysis_timestamp": time.time(),
+        "cache_info": {
+            "total_cached": len([item for item in cached_analyses.values() if item]),
+            "newly_analyzed": len(analysis_results),
+            "cache_usage_percentage": round((len([item for item in cached_analyses.values() if item]) / total_vacancies * 100), 2),
+        },
+        "request_stats": {
             "real_requests": real_requests,
-            "cached_requests": cached_requests,
+            "cached_requests": max(0, cached_requests),
             "total_requests": total_requests,
             "cache_hit_rate": round(cache_hit_rate, 2),
-            "processing_time": time.time() - start_time
-        }
-        
-        logger.info(
-            "Analysis completed",
-            total_vacancies=total_vacancies,
-            tech_vacancies=tech_vacancies,
-            tech_percentage=tech_percentage,
-            cache_hit_rate=cache_hit_rate,
-            processing_time=time.time() - start_time
-        )
-        
-        return final_result
-        
+            "processing_time": round(time.time() - start_time, 3),
+        },
+    }
+
+    if use_cache:
+        await cache_manager.cache_analysis_result(vacancy_ids, technology, exact_search, final_result)
+
+    await analysis_store.add_record(final_result)
+    return final_result
+
+
+@router.post("/analyze")
+async def analyze_vacancies(
+    request: Request,
+    analysis_request: Dict[str, Any] = Body(...),
+    pattern_matcher: PatternMatcher = Depends(get_pattern_matcher),
+    vacancy_client: httpx.AsyncClient = Depends(get_vacancy_client),
+    use_cache: bool = Query(True, description="Использовать кэш"),
+):
+    try:
+        return await _perform_analysis(analysis_request, pattern_matcher, vacancy_client, use_cache=use_cache)
     except httpx.TimeoutException:
         raise HTTPException(status_code=504, detail="Vacancy service timeout")
-    except httpx.HTTPStatusError as e:
-        raise HTTPException(status_code=e.response.status_code, detail=str(e))
-    except Exception as e:
-        logger.error("Analysis error", error=str(e))
-        raise HTTPException(status_code=500, detail=f"Analysis failed: {str(e)}")
+    except httpx.HTTPStatusError as exc:
+        raise HTTPException(status_code=exc.response.status_code, detail=str(exc))
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error("Analysis error", error=str(exc))
+        raise HTTPException(status_code=500, detail=f"Analysis failed: {str(exc)}")
 
 
 @router.post("/analyze/async")
@@ -330,25 +312,20 @@ async def execute_async_analysis(
     try:
         # Обновляем статус
         analysis_tasks[task_id]["status"] = "processing"
-        
-        # Выполняем анализ (упрощенная версия)
-        # В реальности здесь должна быть полная логика анализа
-        
-        await asyncio.sleep(1)  # Имитация обработки
-        
-        # Сохраняем результат
+        result = await _perform_analysis(
+            analysis_request=analysis_request,
+            pattern_matcher=pattern_matcher,
+            vacancy_client=vacancy_client,
+            use_cache=analysis_request.get("use_cache", True),
+        )
+
         analysis_tasks[task_id]["status"] = "completed"
         analysis_tasks[task_id]["result"] = {
             "task_id": task_id,
             "status": "completed",
             "processed_at": time.time(),
-            "sample_result": {
-                "total_vacancies": 100,
-                "tech_vacancies": 45,
-                "tech_percentage": 45.0
-            }
+            "result": result,
         }
-        
     except Exception as e:
         analysis_tasks[task_id]["status"] = "failed"
         analysis_tasks[task_id]["error"] = str(e)

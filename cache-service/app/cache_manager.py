@@ -12,6 +12,7 @@ import redis.asyncio as redis
 from redis.asyncio.cluster import RedisCluster
 from pymongo import MongoClient
 from pymongo.database import Database
+import pymongo
 import msgpack
 import orjson
 import structlog
@@ -212,7 +213,7 @@ class RedisBackend(CacheBackendInterface):
         try:
             # Используем msgpack для эффективной сериализации
             return msgpack.packb(value, use_bin_type=True)
-        except:
+        except Exception:
             # Fallback на pickle
             return pickle.dumps(value)
     
@@ -224,11 +225,11 @@ class RedisBackend(CacheBackendInterface):
         try:
             # Пробуем msgpack
             return msgpack.unpackb(data, raw=False)
-        except:
+        except Exception:
             try:
                 # Fallback на pickle
                 return pickle.loads(data)
-            except:
+            except Exception:
                 # Возвращаем как есть
                 return data
     
@@ -470,7 +471,7 @@ class MemoryBackend(CacheBackendInterface):
         """Получение размера элемента в байтах"""
         try:
             return len(pickle.dumps(item.value))
-        except:
+        except Exception:
             return 1024  # fallback
     
     async def _evict_if_needed(self):
@@ -996,6 +997,7 @@ class CacheManager:
     
     def __init__(self):
         self.backend: Optional[CacheBackendInterface] = None
+        self.start_time = time.time()
         self.metrics: Dict[str, Any] = {
             "operations": {"get": 0, "set": 0, "delete": 0, "hit": 0, "miss": 0},
             "timings": {"get": [], "set": [], "delete": []},

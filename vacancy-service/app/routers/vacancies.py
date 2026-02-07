@@ -1,6 +1,7 @@
 # C:\Users\user\Desktop\TechStats\vacancy-service\app\routers\vacancies.py
 import asyncio
 from typing import List, Dict, Any, Optional
+import httpx
 from fastapi import APIRouter, HTTPException, Query, Body, Request, Depends
 from fastapi.responses import JSONResponse
 import structlog

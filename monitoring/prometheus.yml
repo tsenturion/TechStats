@@ -38,9 +38,9 @@ scrape_configs:
         labels:
           service: 'node'
 
-- job_name: 'cache-service'
+  - job_name: 'cache-service'
     static_configs:
-      - targets: ['cache-service:8003', 'cache-service-2:8004', 'cache-service-3:8005']
+      - targets: ['cache-service:8003', 'cache-service-2:8003', 'cache-service-3:8003']
         labels:
           service: 'cache-service'
           cluster: 'techstats'

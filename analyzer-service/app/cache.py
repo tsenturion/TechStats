@@ -45,6 +45,36 @@ class CacheManager:
     ) -> str:
         """Генерация ключа для анализа конкретной вакансии"""
         return f"vacancy_analysis:{vacancy_id}:{technology}:{exact_search}"
+
+    async def get(self, key: str) -> Optional[Dict[str, Any]]:
+        """Универсальное чтение JSON-значения из Redis."""
+        if not self.redis_client:
+            return None
+
+        try:
+            data = await self.redis_client.get(key)
+            if not data:
+                return None
+            return json.loads(data)
+        except Exception as e:
+            logger.warning("Cache get error", key=key, error=str(e))
+            return None
+
+    async def set(self, key: str, value: Dict[str, Any], ttl: Optional[int] = None) -> bool:
+        """Универсальная запись JSON-значения в Redis."""
+        if not self.redis_client:
+            return False
+
+        try:
+            await self.redis_client.set(
+                key,
+                json.dumps(value, ensure_ascii=False),
+                ex=ttl
+            )
+            return True
+        except Exception as e:
+            logger.error("Cache set error", key=key, error=str(e))
+            return False
     
     async def get_analysis_result(
         self,

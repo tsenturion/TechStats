@@ -1,0 +1,109 @@
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Manrope:wght@400;500;600;700;800&family=Space+Grotesk:wght@500;600;700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --bg: #eff5f5;
+  --panel: #ffffff;
+  --text: #112120;
+  --muted: #516766;
+  --line: #d8e3e2;
+  --accent: #2e9f9a;
+  --accent-strong: #1d5150;
+  --warning: #fca311;
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #9eb8b7 #e9f0f0;
+}
+
+body {
+  margin: 0;
+  font-family: 'Manrope', sans-serif;
+  color: var(--text);
+  background: var(--bg);
+  background-image: radial-gradient(circle at 15% 15%, rgba(46, 159, 154, 0.18), transparent 34%),
+    radial-gradient(circle at 85% 0%, rgba(252, 163, 17, 0.14), transparent 40%),
+    linear-gradient(180deg, #f4f8f8 0%, #eff5f5 100%);
+  min-height: 100vh;
+}
+
+#app {
+  min-height: 100vh;
+}
+
+.panel {
+  @apply rounded-2xl border border-slate-200/80 bg-white/90 shadow-panel backdrop-blur;
+}
+
+.panel-title {
+  @apply font-display text-lg font-semibold tracking-tight text-slate-900;
+}
+
+.form-input {
+  @apply w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none transition;
+}
+
+.form-input:focus {
+  @apply border-brand-500 ring-2 ring-brand-200;
+}
+
+.btn-primary {
+  @apply inline-flex items-center justify-center rounded-xl bg-brand-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-brand-700 disabled:cursor-not-allowed disabled:opacity-50;
+}
+
+.btn-secondary {
+  @apply inline-flex items-center justify-center rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-100;
+}
+
+.btn-danger {
+  @apply inline-flex items-center justify-center rounded-xl bg-rose-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-rose-700 disabled:cursor-not-allowed disabled:opacity-50;
+}
+
+.badge {
+  @apply inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold;
+}
+
+.badge-ok {
+  @apply bg-emerald-100 text-emerald-800;
+}
+
+.badge-warn {
+  @apply bg-amber-100 text-amber-800;
+}
+
+.badge-error {
+  @apply bg-rose-100 text-rose-800;
+}
+
+.badge-neutral {
+  @apply bg-slate-100 text-slate-700;
+}
+
+.table-shell {
+  @apply overflow-x-auto rounded-xl border border-slate-200 bg-white;
+}
+
+.table-shell table {
+  @apply min-w-full text-sm;
+}
+
+.table-shell thead {
+  @apply bg-slate-100/70 text-slate-700;
+}
+
+.table-shell th,
+.table-shell td {
+  @apply whitespace-nowrap border-b border-slate-100 px-3 py-2 text-left align-top;
+}
+
+.table-shell tbody tr:last-child td {
+  @apply border-b-0;
+}
+
+.code-block {
+  @apply overflow-auto rounded-xl bg-slate-950 p-3 font-mono text-xs leading-relaxed text-slate-100;
+}

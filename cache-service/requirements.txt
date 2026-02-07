@@ -15,3 +15,5 @@ orjson==3.9.10
 python-multipart==0.0.6
 psutil==5.9.6
 aiohttp==3.13.2
+pytest==8.3.5
+pytest-asyncio==0.24.0

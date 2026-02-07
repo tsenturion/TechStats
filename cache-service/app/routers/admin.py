@@ -205,7 +205,7 @@ async def monitor_keys(
                 # Оцениваем размер (очень приблизительно)
                 try:
                     size = len(str(value).encode('utf-8'))
-                except:
+                except Exception:
                     size = 0
                 
                 keys_info.append({

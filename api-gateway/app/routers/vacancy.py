@@ -1,13 +1,12 @@
 # C:\Users\user\Desktop\TechStats\api-gateway\app\routers\vacancy.py
-from typing import List, Dict, Any, Optional
+from typing import List
 import httpx
-from fastapi import APIRouter, HTTPException, Query, Request, Depends
+from fastapi import APIRouter, HTTPException, Query, Request
 from slowapi import Limiter
 from slowapi.util import get_remote_address
 
 from config import settings
 from app.cache import cache_manager, cache_response, get_cached_response
-from app.rate_limiting import rate_limit
 
 router = APIRouter()
 limiter = Limiter(key_func=get_remote_address)

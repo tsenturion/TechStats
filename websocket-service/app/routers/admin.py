@@ -1,15 +1,12 @@
 # C:\Users\user\Desktop\TechStats\websocket-service\app\routers\admin.py
 import asyncio
 import time
-from typing import Dict, Any, List, Optional
+from typing import Optional
 from fastapi import APIRouter, HTTPException, Depends, Request, Query
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 import structlog
 
 from config import settings
-from app.connection_manager import ConnectionManager
-from app.session_store import SessionStore
-from app.analysis_proxy import AnalysisProxy
 
 router = APIRouter()
 security = HTTPBearer()
@@ -19,7 +16,7 @@ logger = structlog.get_logger()
 async def verify_admin_token(credentials: HTTPAuthorizationCredentials = Depends(security)):
     """Проверка токена администратора"""
     # В production здесь была бы полноценная проверка JWT
-    admin_token = "admin_secret_token"  # Должен быть в настройках
+    admin_token = settings.admin_token
     
     if credentials.credentials != admin_token:
         raise HTTPException(
@@ -134,11 +131,11 @@ async def admin_disconnect_connection(
                 code=1000,
                 reason="Disconnected by administrator"
             )
-        except:
+        except Exception:
             pass
         
         # Удаление из менеджера
-        connection_manager.disconnect(websocket)
+        await connection_manager.disconnect(websocket)
         
         logger.warning("Connection disconnected by admin", connection_id=connection_id)
         

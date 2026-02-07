@@ -1,19 +1,16 @@
 # C:\Users\user\Desktop\TechStats\api-gateway\main.py
-import asyncio
 import time
 from contextlib import asynccontextmanager
-from typing import Dict, Any, List, Optional
 
 import httpx
-import redis.asyncio as redis
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, Depends, Request
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
-from prometheus_client import Counter, Histogram, generate_latest
+from prometheus_client import Counter, Histogram
 import structlog
 import uvicorn
 
@@ -34,7 +31,6 @@ from app.routers import (
 from app.rate_limiting import rate_limiter
 from app.cache import cache_manager
 from app.metrics import setup_metrics, metrics_router
-from app.websocket_manager import WebSocketManager
 
 # Настройка логирования
 logger = structlog.get_logger()
@@ -57,6 +53,8 @@ async def lifespan(app: FastAPI):
     # Инициализация rate limiter
     await rate_limiter.init_redis()
     logger.info("Rate limiter initialized")
+
+    setup_metrics()
     
     # Проверка доступности сервисов
     await check_services_health()
@@ -109,9 +107,6 @@ app.include_router(cache_router, prefix="/api/v1", tags=["cache"])
 app.include_router(websocket_router, prefix="/api/v1", tags=["websocket"])
 app.include_router(metrics_router, prefix="/api/v1", tags=["metrics"])
 
-# WebSocket менеджер
-websocket_manager = WebSocketManager()
-
 
 @app.middleware("http")
 async def metrics_middleware(request: Request, call_next):
@@ -123,7 +118,7 @@ async def metrics_middleware(request: Request, call_next):
     try:
         response = await call_next(request)
         status_code = response.status_code
-    except Exception as e:
+    except Exception:
         status_code = 500
         response = JSONResponse(
             status_code=500,
@@ -152,6 +147,8 @@ async def check_services_health():
         for name, url in services.items():
             try:
                 response = await client.get(f"{url}/health")
+                if response.status_code == 404:
+                    response = await client.get(f"{url}/api/v1/health")
                 if response.status_code == 200:
                     logger.info(f"Service {name} is healthy", url=url)
                 else:

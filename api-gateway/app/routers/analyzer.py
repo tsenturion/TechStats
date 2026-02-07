@@ -1,5 +1,6 @@
 # C:\Users\user\Desktop\TechStats\api-gateway\app\routers\analyzer.py
 import json
+import asyncio
 from typing import Dict, Any
 import httpx
 from fastapi import APIRouter, HTTPException, Body, Request
@@ -9,8 +10,6 @@ from slowapi.util import get_remote_address
 
 from config import settings
 from app.cache import cache_manager, cache_response
-from app.rate_limiting import rate_limit
-from app.websocket_manager import websocket_manager
 
 router = APIRouter()
 limiter = Limiter(key_func=get_remote_address)
@@ -63,17 +62,29 @@ async def stream_analysis_progress(
     Потоковая передача прогресса анализа через Server-Sent Events
     """
     async def event_generator():
-        # Подключение к WebSocket сервису через API Gateway
         try:
             async with httpx.AsyncClient(timeout=30.0) as client:
-                async with client.stream(
-                    "GET",
-                    f"{settings.websocket_service_url}/api/v1/analyze/progress/{analysis_id}",
-                    timeout=30.0
-                ) as response:
-                    async for chunk in response.aiter_bytes():
-                        yield f"data: {chunk.decode()}\n\n"
-                        
+                while True:
+                    status_response = await client.get(
+                        f"{settings.analyzer_service_url}/api/v1/analyze/async/{analysis_id}/status"
+                    )
+                    if status_response.status_code == 404:
+                        yield f"data: {json.dumps({'error': 'Task not found'})}\n\n"
+                        break
+
+                    status_response.raise_for_status()
+                    status_data = status_response.json()
+                    yield f"data: {json.dumps(status_data)}\n\n"
+
+                    if status_data.get("status") in {"completed", "failed"}:
+                        if status_data.get("status") == "completed":
+                            result_response = await client.get(
+                                f"{settings.analyzer_service_url}/api/v1/analyze/async/{analysis_id}/result"
+                            )
+                            if result_response.status_code == 200:
+                                yield f"data: {json.dumps({'result': result_response.json()})}\n\n"
+                        break
+                    await asyncio.sleep(1)
         except Exception as e:
             yield f"data: {json.dumps({'error': str(e)})}\n\n"
     
@@ -103,7 +114,7 @@ async def get_analysis_results(
     # Проверка кэша
     cached = await cache_manager.get(cache_key)
     if cached:
-        return json.loads(cached)
+        return cached
     
     # Проксирование запроса в сервис анализа
     async with httpx.AsyncClient(timeout=10.0) as client:
@@ -115,7 +126,7 @@ async def get_analysis_results(
             data = response.json()
             
             # Кэширование результата
-            await cache_manager.set(cache_key, json.dumps(data), ttl=600)
+            await cache_manager.set(cache_key, data, ttl=600)
             
             return data
             

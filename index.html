@@ -549,8 +549,10 @@
     </div>
 
     <script>
-        const WS_URL = 'ws://localhost:8000/ws/analyze';
-        const SETTINGS_URL = 'http://localhost:8000/settings';
+        const GATEWAY_HTTP_BASE = `${window.location.protocol}//${window.location.hostname}:8000`;
+        const GATEWAY_WS_BASE = `${window.location.protocol === 'https:' ? 'wss' : 'ws'}://${window.location.hostname}:8000`;
+        const WS_URL = `${GATEWAY_WS_BASE}/api/v1/ws/analyze`;
+        const SETTINGS_URL = `${GATEWAY_HTTP_BASE}/settings`;
 
         let websocket = null;
         let startTime = null;
@@ -633,15 +635,24 @@
             }
 
             fetch(SETTINGS_URL)
-                .then(response => response.json())
+                .then(response => response.ok ? response.json() : null)
                 .then(data => {
-                    document.getElementById('requestDelay').value = data.request_delay;
-                    document.getElementById('maxRequestsPerSecond').value = data.max_requests_per_second;
-                    document.getElementById('cacheTTL').value = data.cache_ttl_hours;
-                    document.getElementById('maxWorkers').value = data.max_workers;
+                    if (!data) return;
+                    if (typeof data.request_delay === 'number') {
+                        document.getElementById('requestDelay').value = data.request_delay;
+                    }
+                    if (typeof data.max_requests_per_second === 'number') {
+                        document.getElementById('maxRequestsPerSecond').value = data.max_requests_per_second;
+                    }
+                    if (typeof data.cache_ttl_hours === 'number') {
+                        document.getElementById('cacheTTL').value = data.cache_ttl_hours;
+                    }
+                    if (typeof data.max_workers === 'number') {
+                        document.getElementById('maxWorkers').value = data.max_workers;
+                    }
                 })
-                .catch(error => {
-                    console.error('Ошибка загрузки настроек:', error);
+                .catch(() => {
+                    // Endpoint optional: keep local defaults from the form.
                 });
 
             populateVacancyDropdown();

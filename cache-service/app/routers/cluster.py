@@ -6,6 +6,7 @@ from fastapi import APIRouter, HTTPException, Body, Query, Depends, Request
 import structlog
 
 from config import settings
+from app.cluster_manager import ClusterNode
 
 router = APIRouter()
 logger = structlog.get_logger()

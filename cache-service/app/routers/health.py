@@ -1,5 +1,6 @@
 # C:\Users\user\Desktop\TechStats\cache-service\app\routers\health.py
 import asyncio
+import time
 from datetime import datetime
 from typing import Dict, Any
 from fastapi import APIRouter, HTTPException, Depends, Request
@@ -7,6 +8,7 @@ import structlog
 
 from config import settings
 from app.cache_manager import CacheManager
+from shared.health import build_process_stats
 
 router = APIRouter()
 logger = structlog.get_logger()
@@ -127,18 +129,10 @@ async def health_check(
         health_status["status"] = "degraded"
     
     # Проверка памяти
-    import psutil
-    process = psutil.Process()
-    memory_info = process.memory_info()
-    
-    health_status["system"] = {
-        "memory_usage_mb": memory_info.rss / 1024 / 1024,
-        "cpu_percent": process.cpu_percent(),
-        "threads": process.num_threads(),
-        "uptime": asyncio.get_event_loop().time()
-    }
-    
+    health_status["system"] = build_process_stats()
+
     # Проверка нагрузки
+    import psutil
     memory_percent = psutil.virtual_memory().percent
     if memory_percent > 90:
         health_status["status"] = "degraded"

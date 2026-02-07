@@ -44,7 +44,7 @@ class TextAnalyzer:
                     self.stopwords = set(stopwords.words('russian'))
                 else:
                     self.stopwords = set(stopwords.words('english'))
-            except:
+            except Exception:
                 # Fallback стоп-слова
                 self.stopwords = {
                     'и', 'в', 'во', 'не', 'что', 'он', 'на', 'я', 'с', 'со', 'как',
@@ -121,7 +121,7 @@ class TextAnalyzer:
         
         try:
             tokens = word_tokenize(text, language=settings.language)
-        except:
+        except Exception:
             # Fallback токенизация
             tokens = text.split()
         

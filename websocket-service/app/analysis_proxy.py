@@ -1,14 +1,13 @@
 # C:\Users\user\Desktop\TechStats\websocket-service\app\analysis_proxy.py
 import asyncio
 import time
-import json
-from typing import Dict, Any, List, Optional, Callable
+from typing import Dict, Any, Optional
 import structlog
 import httpx
+from fastapi import WebSocket
 
 from config import settings
 from app.session_store import SessionStore
-from app.connection_manager import ConnectionManager
 
 logger = structlog.get_logger()
 
@@ -261,47 +260,10 @@ class AnalysisProxy:
                 }
             )
             
-            # Пакетный анализ через analyzer service
-            analysis_response = await self.analyzer_client.post(
-                "/api/v1/analyze/batch",
-                json={
-                    "vacancy_ids": vacancy_ids,
-                    "technologies": [technology],
-                    "exact_search": exact_search
-                }
-            )
-            
-            if analysis_response.status_code != 200:
-                raise Exception(f"Analysis failed: {analysis_response.text}")
-            
-            analysis_data = analysis_response.json()
-            
-            # Извлечение результатов
-            tech_results = analysis_data.get("results_by_technology", {}).get(technology, {})
-            tech_vacancies = tech_results.get("tech_vacancies", 0)
-            tech_percentage = tech_results.get("tech_percentage", 0)
-            
-            # Получение списка вакансий с технологией
-            vacancies_with_tech = []
-            if tech_vacancies > 0:
-                # Получение детальной информации о вакансиях с технологией
-                for vacancy in detailed_vacancies:
-                    vacancy_id = vacancy.get("id")
-                    if vacancy_id:
-                        # В реальном приложении здесь была бы проверка,
-                        # содержит ли вакансия технологию
-                        # Для упрощения берем первые N вакансий
-                        if len(vacancies_with_tech) < 50:  # Ограничиваем список
-                            vacancies_with_tech.append({
-                                "id": vacancy_id,
-                                "name": vacancy.get("name", ""),
-                                "url": vacancy.get("alternate_url", ""),
-                                "company": vacancy.get("employer", {}).get("name", "")
-                            })
-            
-            # Отправка прогресса по мере обработки
+            # Псевдо-прогресс до финального запроса к analyzer service
             processed = 0
             batch_size = settings.batch_size_for_progress
+            found_with_tech_hint = 0
             
             while processed < total_vacancies:
                 await asyncio.sleep(settings.progress_update_interval)
@@ -317,7 +279,7 @@ class AnalysisProxy:
                     metadata={
                         "processed": processed,
                         "total": total_vacancies,
-                        "found_with_tech": tech_vacancies
+                        "found_with_tech": found_with_tech_hint
                     }
                 )
                 
@@ -330,10 +292,29 @@ class AnalysisProxy:
                     metadata={
                         "processed": processed,
                         "total": total_vacancies,
-                        "found_with_tech": tech_vacancies,
+                        "found_with_tech": found_with_tech_hint,
                         "cache_stats": batch_data.get("cache_stats", {})
                     }
                 )
+
+            analysis_response = await self.analyzer_client.post(
+                "/api/v1/analyze",
+                json={
+                    "vacancy_title": vacancy_title,
+                    "technology": technology,
+                    "exact_search": exact_search,
+                    "area": area,
+                    "max_pages": max_pages,
+                    "per_page": per_page,
+                },
+                params={"use_cache": True},
+            )
+
+            if analysis_response.status_code != 200:
+                raise Exception(f"Analysis failed: {analysis_response.text}")
+
+            result = analysis_response.json()
+            result["analysis_timestamp"] = time.time()
             
             # Этап 4: Завершение анализа
             await self.session_store.update_progress(
@@ -351,24 +332,6 @@ class AnalysisProxy:
                 session_id=session_id
             )
             
-            # Формирование финального результата
-            result = {
-                "vacancy_title": vacancy_title,
-                "technology": technology,
-                "exact_search": exact_search,
-                "total_vacancies": total_vacancies,
-                "tech_vacancies": tech_vacancies,
-                "tech_percentage": tech_percentage,
-                "vacancies_with_tech": vacancies_with_tech,
-                "analysis_timestamp": time.time(),
-                "request_stats": {
-                    "vacancy_requests": 2,  # Поиск + batch
-                    "analysis_requests": 1,
-                    "cache_hits": batch_data.get("cache_stats", {}).get("hits", 0),
-                    "cache_misses": batch_data.get("cache_stats", {}).get("misses", 0)
-                }
-            }
-            
             # Завершение сессии
             await self.session_store.complete_session(session_id, result)
             
@@ -385,9 +348,9 @@ class AnalysisProxy:
             logger.info(
                 "Analysis completed",
                 session_id=session_id,
-                total_vacancies=total_vacancies,
-                tech_vacancies=tech_vacancies,
-                tech_percentage=tech_percentage
+                total_vacancies=result.get("total_vacancies", 0),
+                tech_vacancies=result.get("tech_vacancies", 0),
+                tech_percentage=result.get("tech_percentage", 0),
             )
             
         except Exception as e:

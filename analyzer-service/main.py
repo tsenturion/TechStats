@@ -1,20 +1,15 @@
 # C:\Users\user\Desktop\TechStats\analyzer-service\main.py
-import asyncio
 import time
-import json
 from contextlib import asynccontextmanager
-from typing import Dict, Any, List, Optional
-from pathlib import Path
 
 import httpx
-import redis.asyncio as redis
-from fastapi import FastAPI, HTTPException, BackgroundTasks
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
 import structlog
 import uvicorn
-from prometheus_client import Counter, Histogram, Gauge, generate_latest
+from prometheus_client import Counter, Histogram, Gauge
 
 from config import settings
 from app.middleware import RequestLoggingMiddleware, ResponseTimeMiddleware
@@ -134,7 +129,7 @@ app.include_router(metrics.router, prefix="/api/v1", tags=["metrics"])
 
 
 @app.middleware("http")
-async def metrics_middleware(request, call_next):
+async def metrics_middleware(request: Request, call_next):
     """Middleware для сбора метрик"""
     start_time = time.time()
     endpoint = request.url.path
@@ -143,7 +138,7 @@ async def metrics_middleware(request, call_next):
         response = await call_next(request)
         status_code = response.status_code
         ANALYSIS_REQUESTS.labels(type=endpoint.split('/')[-1], status=status_code).inc()
-    except Exception as e:
+    except Exception:
         status_code = 500
         response = JSONResponse(
             status_code=500,

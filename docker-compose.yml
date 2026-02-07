@@ -1,5 +1,4 @@
 # Обновляем docker-compose.yml с Cache Service
-version: '3.8'
 
 services:
   # Redis для кэша
@@ -56,12 +55,13 @@ services:
       - MAX_CACHE_SIZE_MB=1024
       - CLEANUP_INTERVAL_SECONDS=300
       - ENABLE_CLUSTERING=false
-      - CLUSTER_NODES=http://cache-node-1:8003,http://cache-node-2:8003,http://cache-node-3:8003
+      - CLUSTER_NODES=http://cache-service:8003,http://cache-service-2:8003,http://cache-service-3:8003
       - REDIS_CLUSTER_NODES=redis://redis-1:6379,redis://redis-2:6379,redis://redis-3:6379
       - API_RATE_LIMIT_PER_MINUTE=1000
       - API_RATE_LIMIT_PER_HOUR=10000
     volumes:
       - ./cache-service:/app
+      - ./shared:/app/shared
       - ./cache-service/logs:/app/logs
     networks:
       - techstats-network
@@ -82,7 +82,7 @@ services:
     container_name: techstats-cache-service-2
     restart: unless-stopped
     ports:
-      - "8004:8004"
+      - "8014:8003"
     environment:
       - ENVIRONMENT=development
       - NODE_ID=cache-node-2
@@ -91,17 +91,17 @@ services:
       - CACHE_STRATEGY=lru
       - DEFAULT_TTL_SECONDS=3600
       - ENABLE_CLUSTERING=true
-      - CLUSTER_NODES=http://cache-node-1:8003,http://cache-node-2:8004,http://cache-node-3:8005
-      - PORT=8004
+      - CLUSTER_NODES=http://cache-service:8003,http://cache-service-2:8003,http://cache-service-3:8003
     volumes:
       - ./cache-service:/app
+      - ./shared:/app/shared
     networks:
       - techstats-network
     depends_on:
       - redis
       - cache-service
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8004/api/v1/health"]
+      test: ["CMD", "curl", "-f", "http://localhost:8003/api/v1/health"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -112,7 +112,7 @@ services:
     container_name: techstats-cache-service-3
     restart: unless-stopped
     ports:
-      - "8005:8005"
+      - "8015:8003"
     environment:
       - ENVIRONMENT=development
       - NODE_ID=cache-node-3
@@ -121,17 +121,17 @@ services:
       - CACHE_STRATEGY=lru
       - DEFAULT_TTL_SECONDS=3600
       - ENABLE_CLUSTERING=true
-      - CLUSTER_NODES=http://cache-node-1:8003,http://cache-node-2:8004,http://cache-node-3:8005
-      - PORT=8005
+      - CLUSTER_NODES=http://cache-service:8003,http://cache-service-2:8003,http://cache-service-3:8003
     volumes:
       - ./cache-service:/app
+      - ./shared:/app/shared
     networks:
       - techstats-network
     depends_on:
       - redis
       - cache-service
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8005/api/v1/health"]
+      test: ["CMD", "curl", "-f", "http://localhost:8003/api/v1/health"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -152,6 +152,7 @@ services:
       - WEBSOCKET_SERVICE_URL=http://websocket-service:8004
     volumes:
       - ./api-gateway:/app
+      - ./shared:/app/shared
     networks:
       - techstats-network
     depends_on:
@@ -164,7 +165,7 @@ services:
       cache-service:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/health"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -185,6 +186,7 @@ services:
       - CACHE_TTL_HOURS=24
     volumes:
       - ./vacancy-service:/app
+      - ./shared:/app/shared
       - ./vacancy-service/logs:/app/logs
     networks:
       - techstats-network
@@ -218,6 +220,7 @@ services:
       - LANGUAGE=ru
     volumes:
       - ./analyzer-service:/app
+      - ./shared:/app/shared
       - ./analyzer-service/logs:/app/logs
       - ./analyzer-service/data:/app/data
     networks:
@@ -306,6 +309,7 @@ services:
       - BATCH_SIZE_FOR_PROGRESS=10
     volumes:
       - ./websocket-service:/app
+      - ./shared:/app/shared
       - ./websocket-service/logs:/app/logs
     networks:
       - techstats-network
@@ -320,6 +324,31 @@ services:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8004/api/v1/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  frontend:
+    build: ./frontend
+    container_name: techstats-frontend
+    restart: unless-stopped
+    ports:
+      - "8088:80"
+    networks:
+      - techstats-network
+    depends_on:
+      api-gateway:
+        condition: service_healthy
+      vacancy-service:
+        condition: service_healthy
+      analyzer-service:
+        condition: service_healthy
+      cache-service:
+        condition: service_healthy
+      websocket-service:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1/healthz"]
       interval: 30s
       timeout: 10s
       retries: 3

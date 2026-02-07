@@ -1,0 +1,233 @@
+{
+  "patterns": {
+    "python": {
+      "name": "Python",
+      "category": "programming_language",
+      "patterns": [
+        "\\bpython\\b",
+        "\\bpython3\\b",
+        "\\bpython3\\.\\d+\\b",
+        "\\bcpython\\b",
+        "\\bdjango\\b",
+        "\\bflask\\b",
+        "\\bfastapi\\b",
+        "\\bnumpy\\b",
+        "\\bpandas\\b",
+        "\\bscikit-learn\\b",
+        "\\btensorflow\\b",
+        "\\bpytorch\\b"
+      ],
+      "weight": 1.0,
+      "aliases": [
+        "py",
+        "python3",
+        "python3.11",
+        "django",
+        "flask"
+      ],
+      "description": "Язык программирования Python и его фреймворки"
+    },
+    "java": {
+      "name": "Java",
+      "category": "programming_language",
+      "patterns": [
+        "\\bjava\\b",
+        "\\bjava\\s*\\d+\\b",
+        "\\bspring\\b",
+        "\\bhibernate\\b",
+        "\\bmaven\\b",
+        "\\bgradle\\b",
+        "\\bjunit\\b",
+        "\\bmockito\\b"
+      ],
+      "weight": 1.0,
+      "aliases": [
+        "java8",
+        "java11",
+        "java17",
+        "spring",
+        "hibernate"
+      ],
+      "description": "Язык программирования Java и его экосистема"
+    },
+    "javascript": {
+      "name": "JavaScript",
+      "category": "programming_language",
+      "patterns": [
+        "\\bjavascript\\b",
+        "\\bjs\\b",
+        "\\bnode\\.?js\\b",
+        "\\bnodejs\\b",
+        "\\btypescript\\b",
+        "\\bts\\b",
+        "\\breact\\b",
+        "\\bangular\\b",
+        "\\bvue\\b",
+        "\\bexpress\\b",
+        "\\bnestjs\\b"
+      ],
+      "weight": 1.0,
+      "aliases": [
+        "js",
+        "node",
+        "nodejs",
+        "ts",
+        "typescript",
+        "react",
+        "angular",
+        "vue"
+      ],
+      "description": "JavaScript и его фреймворки"
+    },
+    "sql": {
+      "name": "SQL",
+      "category": "database",
+      "patterns": [
+        "\\bsql\\b",
+        "\\bpostgresql\\b",
+        "\\bmysql\\b",
+        "\\bmariadb\\b",
+        "\\bsqlite\\b",
+        "\\bmssql\\b",
+        "\\bsql\\s*server\\b",
+        "\\boracle\\b",
+        "\\bpl/sql\\b"
+      ],
+      "weight": 1.0,
+      "aliases": [
+        "postgres",
+        "postgresql",
+        "mysql",
+        "mariadb"
+      ],
+      "description": "Язык SQL и реляционные СУБД"
+    },
+    "docker": {
+      "name": "Docker",
+      "category": "devops",
+      "patterns": [
+        "\\bdocker\\b",
+        "\\bdockerfile\\b",
+        "\\bdocker-compose\\b",
+        "\\bcontainer\\b",
+        "\\bcontainers\\b"
+      ],
+      "weight": 1.0,
+      "aliases": [
+        "docker-compose",
+        "container"
+      ],
+      "description": "Контейнеризация с Docker"
+    },
+    "kubernetes": {
+      "name": "Kubernetes",
+      "category": "devops",
+      "patterns": [
+        "\\bkubernetes\\b",
+        "\\bk8s\\b",
+        "\\bhelm\\b",
+        "\\bkubectl\\b",
+        "\\bminikube\\b"
+      ],
+      "weight": 1.0,
+      "aliases": [
+        "k8s",
+        "helm"
+      ],
+      "description": "Оркестрация контейнеров с Kubernetes"
+    },
+    "aws": {
+      "name": "AWS",
+      "category": "cloud",
+      "patterns": [
+        "\\baws\\b",
+        "\\bamazon\\s*web\\s*services\\b",
+        "\\bec2\\b",
+        "\\bs3\\b",
+        "\\blambda\\b",
+        "\\brds\\b",
+        "\\bcloudformation\\b",
+        "\\becs\\b",
+        "\\beck\\b"
+      ],
+      "weight": 1.0,
+      "aliases": [
+        "amazon",
+        "ec2",
+        "s3",
+        "lambda"
+      ],
+      "description": "Amazon Web Services"
+    },
+    "linux": {
+      "name": "Linux",
+      "category": "os",
+      "patterns": [
+        "\\blinux\\b",
+        "\\bubuntu\\b",
+        "\\bcentos\\b",
+        "\\bdebian\\b",
+        "\\bredhat\\b",
+        "\\bfedora\\b",
+        "\\bunix\\b"
+      ],
+      "weight": 1.0,
+      "aliases": [
+        "ubuntu",
+        "centos",
+        "debian"
+      ],
+      "description": "Операционные системы на базе Linux"
+    }
+  },
+  "categories": [
+    "database",
+    "library",
+    "framework",
+    "cloud",
+    "devops",
+    "programming_language",
+    "os",
+    "tool"
+  ],
+  "aliases": {
+    "py": "python",
+    "python3": "python",
+    "python3.11": "python",
+    "django": "python",
+    "flask": "python",
+    "java8": "java",
+    "java11": "java",
+    "java17": "java",
+    "spring": "java",
+    "hibernate": "java",
+    "js": "javascript",
+    "node": "javascript",
+    "nodejs": "javascript",
+    "ts": "javascript",
+    "typescript": "javascript",
+    "react": "javascript",
+    "angular": "javascript",
+    "vue": "javascript",
+    "postgres": "sql",
+    "postgresql": "sql",
+    "mysql": "sql",
+    "mariadb": "sql",
+    "docker-compose": "docker",
+    "container": "docker",
+    "k8s": "kubernetes",
+    "helm": "kubernetes",
+    "amazon": "aws",
+    "ec2": "aws",
+    "s3": "aws",
+    "lambda": "aws",
+    "ubuntu": "linux",
+    "centos": "linux",
+    "debian": "linux"
+  },
+  "metadata": {
+    "version": "1.0.0",
+    "loaded_at": 2402.83,
+    "count": 8
+  }
+}

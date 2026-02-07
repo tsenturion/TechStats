@@ -1,13 +1,11 @@
 # C:\Users\user\Desktop\TechStats\cache-service\main.py
-import asyncio
 import time
 from contextlib import asynccontextmanager
-from typing import Dict, Any, List, Optional
 import signal
 import sys
 
 import uvicorn
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
@@ -19,7 +17,7 @@ from app.routers import cache, health, metrics, admin, cluster
 from app.cache_manager import CacheManager
 from app.cleanup_scheduler import CleanupScheduler
 from app.cluster_manager import ClusterManager
-from app.metrics import setup_metrics, metrics_router
+from app.metrics import setup_metrics
 
 # Настройка логирования
 logger = structlog.get_logger()

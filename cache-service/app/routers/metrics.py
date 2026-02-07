@@ -4,6 +4,7 @@ from typing import Dict, Any
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import Response
 from prometheus_client import generate_latest, CONTENT_TYPE_LATEST, Counter, Histogram, Gauge
+from config import settings
 
 router = APIRouter()
 
@@ -51,7 +52,7 @@ async def get_metrics(request: Request):
             stats = await request.app.state.cache_manager.get_stats()
             
             if "backend" in stats and "total_items" in stats["backend"]:
-                CACHE_SIZE.labels(node=request.app.state.settings.node_id).set(
+                CACHE_SIZE.labels(node=settings.node_id).set(
                     stats["backend"]["total_items"]
                 )
             
@@ -61,7 +62,7 @@ async def get_metrics(request: Request):
                 if "MB" in memory_str:
                     memory_mb = float(memory_str.replace("MB", "").strip())
                     memory_bytes = memory_mb * 1024 * 1024
-                    CACHE_MEMORY.labels(node=request.app.state.settings.node_id).set(memory_bytes)
+                    CACHE_MEMORY.labels(node=settings.node_id).set(memory_bytes)
         
         except Exception as e:
             pass
