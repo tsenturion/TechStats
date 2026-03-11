@@ -1,8 +1,6 @@
 # C:\Users\user\Desktop\TechStats\cache-service\app\routers\health.py
-import asyncio
 import time
 from datetime import datetime
-from typing import Dict, Any
 from fastapi import APIRouter, HTTPException, Depends, Request
 import structlog
 

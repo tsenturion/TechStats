@@ -1,4 +1,8 @@
+import axios from 'axios'
 import { reactive } from 'vue'
+import { useMutation, useQuery } from '@tanstack/vue-query'
+
+import { useAuth } from './useAuth'
 
 const STORAGE_KEY = 'techstats_frontend_config_v1'
 
@@ -16,9 +20,7 @@ const defaults = {
 function readPersistedConfig() {
   try {
     const raw = localStorage.getItem(STORAGE_KEY)
-    if (!raw) {
-      return { ...defaults }
-    }
+    if (!raw) return { ...defaults }
     const parsed = JSON.parse(raw)
     return { ...defaults, ...parsed }
   } catch {
@@ -43,9 +45,7 @@ function buildUrl(service, path = '', query = null) {
   const url = new URL(`${base}${normalizedPath}`)
   if (query && typeof query === 'object') {
     Object.entries(query).forEach(([key, value]) => {
-      if (value === undefined || value === null || value === '') {
-        return
-      }
+      if (value === undefined || value === null || value === '') return
       if (Array.isArray(value)) {
         value.forEach((item) => {
           if (item !== undefined && item !== null && item !== '') {
@@ -61,81 +61,101 @@ function buildUrl(service, path = '', query = null) {
 }
 
 function toWsBase(httpBase) {
-  if (httpBase.startsWith('https://')) {
-    return `wss://${httpBase.slice('https://'.length)}`
-  }
-  if (httpBase.startsWith('http://')) {
-    return `ws://${httpBase.slice('http://'.length)}`
-  }
+  if (httpBase.startsWith('https://')) return `wss://${httpBase.slice('https://'.length)}`
+  if (httpBase.startsWith('http://')) return `ws://${httpBase.slice('http://'.length)}`
   return httpBase
 }
 
-function wsUrl(service, path = '') {
+function wsUrl(service, path = '', options = {}) {
+  const { query = null, includeAuth = false } = options
+  const { authState } = useAuth()
   const base = toWsBase((config[service] || '').replace(/\/+$/, ''))
   const normalizedPath = path.startsWith('/') ? path : `/${path}`
-  return `${base}${normalizedPath}`
+  const url = new URL(`${base}${normalizedPath}`)
+
+  if (query && typeof query === 'object') {
+    Object.entries(query).forEach(([key, value]) => {
+      if (value === undefined || value === null || value === '') return
+      url.searchParams.set(key, String(value))
+    })
+  }
+
+  if (includeAuth && authState.accessToken) {
+    url.searchParams.set('access_token', authState.accessToken)
+  }
+
+  return url.toString()
 }
 
 async function apiRequest(service, path, options = {}) {
+  const { authState } = useAuth()
   const {
     method = 'GET',
     query = null,
     body = undefined,
     headers = {},
     parseAs = 'json',
+    auth = true,
+    timeout = 60_000,
   } = options
 
-  const url = buildUrl(service, path, query)
-  const init = {
-    method,
-    headers: {
-      ...headers,
+  const url = buildUrl(service, path)
+  const requestHeaders = { ...headers }
+  if (auth && authState.accessToken && !requestHeaders.Authorization) {
+    requestHeaders.Authorization = `Bearer ${authState.accessToken}`
+  }
+
+  try {
+    const response = await axios.request({
+      url,
+      method,
+      params: query || undefined,
+      data: body,
+      headers: requestHeaders,
+      timeout,
+      responseType: parseAs === 'text' ? 'text' : 'json',
+    })
+
+    return {
+      status: response.status,
+      headers: response.headers,
+      data: response.data,
+      raw: typeof response.data === 'string' ? response.data : JSON.stringify(response.data ?? ''),
+      url,
+    }
+  } catch (error) {
+    const response = error?.response
+    const wrapped = new Error(
+      response ? `HTTP ${response.status} ${response.statusText || ''}`.trim() : error?.message || 'Request failed',
+    )
+    wrapped.status = response?.status
+    wrapped.url = url
+    wrapped.data = response?.data
+    throw wrapped
+  }
+}
+
+function useApiQuery({ queryKey, service, path, options = {}, enabled = true }) {
+  return useQuery({
+    queryKey,
+    enabled,
+    queryFn: async () => {
+      const response = await apiRequest(service, path, options)
+      return response.data
     },
-  }
+  })
+}
 
-  if (body !== undefined) {
-    if (body instanceof FormData) {
-      init.body = body
-    } else if (typeof body === 'string') {
-      init.body = body
-      if (!init.headers['Content-Type']) {
-        init.headers['Content-Type'] = 'text/plain'
-      }
-    } else {
-      init.body = JSON.stringify(body)
-      if (!init.headers['Content-Type']) {
-        init.headers['Content-Type'] = 'application/json'
-      }
-    }
-  }
-
-  const response = await fetch(url, init)
-  const raw = await response.text()
-
-  let data = raw
-  if (parseAs === 'json') {
-    try {
-      data = raw ? JSON.parse(raw) : null
-    } catch {
-      data = raw
-    }
-  }
-
-  if (!response.ok) {
-    const error = new Error(`HTTP ${response.status} ${response.statusText}`)
-    error.status = response.status
-    error.url = url
-    error.data = data
-    throw error
-  }
-
-  return {
-    status: response.status,
-    headers: response.headers,
-    data,
-    raw,
-    url,
-  }
+function useApiMutation({ service, path, defaultOptions = {} }) {
+  return useMutation({
+    mutationFn: async (payload) => {
+      const response = await apiRequest(service, path, {
+        ...defaultOptions,
+        body: payload,
+      })
+      return response.data
+    },
+  })
 }
 
 export function useApi() {
@@ -147,5 +167,7 @@ export function useApi() {
     buildUrl,
     wsUrl,
     apiRequest,
+    useApiQuery,
+    useApiMutation,
   }
 }

@@ -3,8 +3,10 @@ import { reactive, ref } from 'vue'
 
 import SectionHeader from '../components/SectionHeader.vue'
 import { useApi } from '../composables/useApi'
+import { useUiPrefs } from '../composables/useUiPrefs'
 
 const { apiRequest } = useApi()
+const { language } = useUiPrefs()
 
 const errors = ref([])
 const activeKey = ref('gateway')
@@ -28,8 +30,37 @@ const payloads = reactive({
 
 const loading = ref(false)
 
+const messages = {
+  ru: {
+    subtitle: 'Сбор Prometheus-метрик и JSON summary из всех сервисов.',
+    refreshAll: 'Обновить все метрики',
+    refreshing: 'Обновление...',
+    noMetrics: 'Метрики еще не загружены',
+    vacancySummaryTitle: 'Vacancy Metrics Summary (JSON)',
+    noSummary: 'Сводка еще не загружена',
+    errors: 'Ошибки',
+    unknownError: 'неизвестная ошибка',
+    vacancySummaryScope: 'Сводка Vacancy',
+  },
+  en: {
+    subtitle: 'Prometheus metrics collection and JSON summary from all services.',
+    refreshAll: 'Refresh all metrics',
+    refreshing: 'Refreshing...',
+    noMetrics: 'No metrics loaded yet',
+    vacancySummaryTitle: 'Vacancy Metrics Summary (JSON)',
+    noSummary: 'No summary yet',
+    errors: 'Errors',
+    unknownError: 'unknown error',
+    vacancySummaryScope: 'Vacancy summary',
+  },
+}
+
+function t(key) {
+  return messages[language.value]?.[key] || messages.en[key] || key
+}
+
 function addError(scope, error) {
-  const detail = error?.data?.detail || error?.message || 'unknown error'
+  const detail = error?.data?.detail || error?.message || t('unknownError')
   errors.value.unshift(`[${scope}] ${detail}`)
 }
 
@@ -54,7 +85,7 @@ async function refreshMetrics() {
     const summary = await apiRequest('vacancy', '/api/v1/metrics/summary')
     payloads.vacancySummary = summary.data
   } catch (error) {
-    addError('Vacancy summary', error)
+    addError(t('vacancySummaryScope'), error)
   } finally {
     loading.value = false
   }
@@ -63,8 +94,8 @@ async function refreshMetrics() {
 
 <template>
   <div class="space-y-4">
-    <SectionHeader title="Metrics" subtitle="Сбор Prometheus-метрик и JSON summary из всех сервисов.">
-      <button class="btn-primary" :disabled="loading" @click="refreshMetrics">{{ loading ? 'Refreshing...' : 'Refresh all metrics' }}</button>
+    <SectionHeader title="Metrics" :subtitle="t('subtitle')">
+      <button class="btn-primary" :disabled="loading" @click="refreshMetrics">{{ loading ? t('refreshing') : t('refreshAll') }}</button>
     </SectionHeader>
 
     <section class="panel p-4">
@@ -80,16 +111,16 @@ async function refreshMetrics() {
         </button>
       </div>
 
-      <pre class="code-block h-[28rem]">{{ payloads[activeKey] || 'No metrics loaded yet' }}</pre>
+      <pre class="code-block h-[28rem]">{{ payloads[activeKey] || t('noMetrics') }}</pre>
     </section>
 
     <section class="panel p-4">
-      <h3 class="panel-title text-base">Vacancy Metrics Summary (JSON)</h3>
-      <pre class="code-block mt-3 max-h-72">{{ payloads.vacancySummary ? JSON.stringify(payloads.vacancySummary, null, 2) : 'No summary yet' }}</pre>
+      <h3 class="panel-title text-base">{{ t('vacancySummaryTitle') }}</h3>
+      <pre class="code-block mt-3 max-h-72">{{ payloads.vacancySummary ? JSON.stringify(payloads.vacancySummary, null, 2) : t('noSummary') }}</pre>
     </section>
 
     <section v-if="errors.length" class="panel border-rose-200 bg-rose-50 p-4">
-      <h3 class="panel-title text-base text-rose-700">Errors</h3>
+      <h3 class="panel-title text-base text-rose-700">{{ t('errors') }}</h3>
       <ul class="mt-2 list-disc space-y-1 pl-5 text-sm text-rose-700">
         <li v-for="item in errors" :key="item">{{ item }}</li>
       </ul>

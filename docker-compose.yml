@@ -71,7 +71,7 @@ services:
       mongo:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8003/api/v1/health/ready"]
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8003/api/v1/health/ready')"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -101,7 +101,7 @@ services:
       - redis
       - cache-service
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8003/api/v1/health"]
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8003/api/v1/health')"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -131,7 +131,7 @@ services:
       - redis
       - cache-service
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8003/api/v1/health"]
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8003/api/v1/health')"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -150,6 +150,11 @@ services:
       - ANALYZER_SERVICE_URL=http://analyzer-service:8002
       - CACHE_SERVICE_URL=http://cache-service:8003
       - WEBSOCKET_SERVICE_URL=http://websocket-service:8004
+      - ADMIN_USERNAME=admin
+      - ADMIN_PASSWORD=admin
+      - USER_USERNAME=user
+      - USER_PASSWORD=user
+      - JWT_SECRET_KEY=techstats-dev-jwt-secret
     volumes:
       - ./api-gateway:/app
       - ./shared:/app/shared
@@ -165,7 +170,7 @@ services:
       cache-service:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/health"]
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/v1/health')"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -194,7 +199,7 @@ services:
       redis:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8001/api/v1/health/ready"]
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8001/api/v1/health/ready')"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -218,6 +223,7 @@ services:
       - ENABLE_LEMMATIZATION=true
       - REMOVE_STOPWORDS=true
       - LANGUAGE=ru
+      - CELERY_ENABLED=false
     volumes:
       - ./analyzer-service:/app
       - ./shared:/app/shared
@@ -231,7 +237,7 @@ services:
       vacancy-service:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8002/api/v1/health"]
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8002/api/v1/health')"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -323,7 +329,7 @@ services:
       cache-service:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8004/api/v1/health"]
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8004/api/v1/health')"]
       interval: 30s
       timeout: 10s
       retries: 3

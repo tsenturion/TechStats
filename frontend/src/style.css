@@ -35,6 +35,89 @@ body {
   min-height: 100vh;
 }
 
+.app-header {
+  @apply border-b border-slate-200 bg-white/85;
+}
+
+.app-nav-link {
+  @apply rounded-xl px-3 py-2 text-sm font-semibold transition;
+}
+
+.app-nav-link-active {
+  @apply bg-brand-600 text-white;
+}
+
+.app-nav-link-idle {
+  @apply text-slate-700 hover:bg-slate-100;
+}
+
+.toggle-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px;
+  border: 1px solid #cbd5e1;
+  border-radius: 12px;
+  background: #ffffff;
+}
+
+.toggle-label {
+  margin-right: 4px;
+  padding: 0 8px;
+  font-size: 12px;
+  font-weight: 700;
+  color: #475569;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.toggle-btn {
+  border: 0;
+  border-radius: 9px;
+  padding: 6px 10px;
+  font-size: 12px;
+  font-weight: 700;
+  color: #475569;
+  background: transparent;
+  cursor: pointer;
+  transition: background-color 0.2s ease, color 0.2s ease;
+}
+
+.toggle-btn:hover {
+  background: #f1f5f9;
+}
+
+.toggle-btn-active {
+  background: #2e9f9a;
+  color: #ffffff;
+}
+
+.toggle-btn-active:hover {
+  background: #1d5150;
+}
+
+.auth-strip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.auth-input {
+  width: 120px;
+  border: 1px solid #cbd5e1;
+  border-radius: 10px;
+  padding: 6px 10px;
+  font-size: 12px;
+  color: #0f172a;
+  background: #ffffff;
+}
+
+.auth-input:focus {
+  outline: none;
+  border-color: #2e9f9a;
+  box-shadow: 0 0 0 2px rgba(46, 159, 154, 0.22);
+}
+
 .panel {
   @apply rounded-2xl border border-slate-200/80 bg-white/90 shadow-panel backdrop-blur;
 }
@@ -106,4 +189,131 @@ body {
 
 .code-block {
   @apply overflow-auto rounded-xl bg-slate-950 p-3 font-mono text-xs leading-relaxed text-slate-100;
+}
+
+body.theme-dark {
+  --bg: #0b141d;
+  --text: #e2e8f0;
+  --muted: #93a6ba;
+  --line: #334155;
+  --accent: #2e9f9a;
+  --accent-strong: #77d4cf;
+  --warning: #f59e0b;
+  background-image: radial-gradient(circle at 15% 15%, rgba(46, 159, 154, 0.12), transparent 34%),
+    radial-gradient(circle at 85% 0%, rgba(245, 158, 11, 0.12), transparent 40%),
+    linear-gradient(180deg, #0f172a 0%, #0b141d 100%);
+}
+
+body.theme-dark * {
+  scrollbar-color: #475569 #1e293b;
+}
+
+body.theme-dark .app-header {
+  border-color: #334155;
+  background: rgba(15, 23, 42, 0.86);
+}
+
+body.theme-dark .panel {
+  border-color: rgba(71, 85, 105, 0.85);
+  background: rgba(15, 23, 42, 0.9);
+  box-shadow: 0 12px 32px rgba(2, 6, 23, 0.45);
+}
+
+body.theme-dark .panel-title {
+  color: #f8fafc;
+}
+
+body.theme-dark .form-input {
+  border-color: #475569;
+  background: #0b1220;
+  color: #e2e8f0;
+}
+
+body.theme-dark .form-input:focus {
+  border-color: #2e9f9a;
+  box-shadow: 0 0 0 2px rgba(46, 159, 154, 0.28);
+}
+
+body.theme-dark .btn-secondary {
+  border-color: #475569;
+  background: #1e293b;
+  color: #e2e8f0;
+}
+
+body.theme-dark .btn-secondary:hover {
+  background: #334155;
+}
+
+body.theme-dark .app-nav-link-idle {
+  color: #e2e8f0;
+}
+
+body.theme-dark .app-nav-link-idle:hover {
+  background: #334155;
+}
+
+body.theme-dark .table-shell {
+  border-color: #475569;
+  background: #0f172a;
+}
+
+body.theme-dark .table-shell thead {
+  background: rgba(51, 65, 85, 0.7);
+  color: #e2e8f0;
+}
+
+body.theme-dark .table-shell th,
+body.theme-dark .table-shell td {
+  border-color: #334155;
+  color: #dbeafe;
+}
+
+body.theme-dark .code-block {
+  background: #020617;
+  color: #e2e8f0;
+}
+
+body.theme-dark .toggle-group {
+  border-color: #475569;
+  background: #1e293b;
+}
+
+body.theme-dark .toggle-label {
+  color: #cbd5e1;
+}
+
+body.theme-dark .toggle-btn {
+  color: #cbd5e1;
+}
+
+body.theme-dark .toggle-btn:hover {
+  background: #334155;
+}
+
+body.theme-dark .auth-input {
+  border-color: #475569;
+  background: #0f172a;
+  color: #e2e8f0;
+}
+
+body.theme-dark .auth-input:focus {
+  border-color: #2e9f9a;
+  box-shadow: 0 0 0 2px rgba(46, 159, 154, 0.3);
+}
+
+body.theme-dark .text-slate-900,
+body.theme-dark .text-slate-800 {
+  color: #f8fafc !important;
+}
+
+body.theme-dark .text-slate-700 {
+  color: #dbeafe !important;
+}
+
+body.theme-dark .text-slate-600 {
+  color: #cbd5e1 !important;
+}
+
+body.theme-dark .text-slate-500 {
+  color: #94a3b8 !important;
 }

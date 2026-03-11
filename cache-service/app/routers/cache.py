@@ -1,7 +1,7 @@
 # C:\Users\user\Desktop\TechStats\cache-service\app\routers\cache.py
 import asyncio
 import time
-from typing import Dict, List, Any, Optional, Union
+from typing import Dict, List, Any, Optional
 from fastapi import APIRouter, HTTPException, Body, Query, Depends, Request
 from fastapi.responses import JSONResponse
 import structlog
@@ -142,10 +142,14 @@ async def replicate_cache(
     """
     # Проверяем секретный ключ для безопасности
     secret = request.headers.get("X-Replication-Secret")
-    expected_secret = f"replicate-{settings.node_id}-{int(time.time() / 3600)}"  # Меняется каждый час
-    
-    # Простая проверка (в production нужно что-то более безопасное)
-    if not secret or not secret.startswith("replicate-"):
+    current_bucket = int(time.time() / 3600)
+    expected_secrets = {
+        f"replicate-{settings.node_id}-{current_bucket}",
+        f"replicate-{settings.node_id}-{current_bucket - 1}",
+    }
+
+    # Допускаем текущий и предыдущий час, чтобы переживать границу часа между нодами.
+    if not secret or secret not in expected_secrets:
         raise HTTPException(status_code=403, detail="Replication not allowed")
     
     key = replicate_data.get("key")

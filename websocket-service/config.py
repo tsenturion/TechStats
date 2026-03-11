@@ -30,6 +30,7 @@ class Settings(BaseSettings):
     # Session management
     session_ttl_seconds: int = 3600  # 1 hour
     cleanup_interval_seconds: int = 60
+    websocket_pubsub_channel: str = "techstats:websocket:broadcast"
     
     # Analysis progress
     progress_update_interval: float = 0.5  # seconds

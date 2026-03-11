@@ -2,7 +2,6 @@
 import json
 import hashlib
 from typing import Optional, Any, Dict, List
-from datetime import datetime, timedelta
 import redis.asyncio as redis
 import structlog
 

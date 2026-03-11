@@ -1,12 +1,10 @@
-from typing import Dict
-
 import structlog
 from fastapi import Request
-from jose import JWTError, jwt
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse
 
 from config import settings
+from app.security import decode_access_token, enforce_rbac
 from shared.middleware import BaseRequestLoggingMiddleware, BaseResponseTimeMiddleware
 
 logger = structlog.get_logger()
@@ -30,21 +28,31 @@ class AuthenticationMiddleware(BaseHTTPMiddleware):
 
     async def dispatch(self, request: Request, call_next):
         path = request.url.path
+        method = request.method.upper()
 
-        public_prefixes = (
+        public_exact_paths = {
             "/",
             "/docs",
             "/redoc",
             "/openapi.json",
+            "/api/v1/auth/login",
+            "/api/v1/auth/register",
+            "/api/v1/auth/public",
+            "/api/v1/auth/refresh",
+        }
+        public_prefixes = (
             "/api/v1/health",
             "/api/v1/metrics",
+            "/api/v1/runtime-settings/public",
             "/ws/",
         )
-        if path.startswith(public_prefixes):
+        if path in public_exact_paths or path.startswith(public_prefixes):
             return await call_next(request)
 
         auth_header = request.headers.get("Authorization")
         if not auth_header:
+            if not enforce_rbac("guest", path, method):
+                return JSONResponse(status_code=401, content={"detail": "Authentication required"})
             return await call_next(request)
 
         try:
@@ -56,10 +64,14 @@ class AuthenticationMiddleware(BaseHTTPMiddleware):
             return JSONResponse(status_code=401, content={"detail": "Unsupported auth scheme"})
 
         try:
-            payload = jwt.decode(token, settings.jwt_secret_key, algorithms=[settings.jwt_algorithm])
+            payload = decode_access_token(token)
             request.state.user = payload
-        except JWTError:
+        except Exception:
             return JSONResponse(status_code=401, content={"detail": "Invalid token"})
+
+        role = str(payload.get("role", "guest"))
+        if not enforce_rbac(role, path, method):
+            return JSONResponse(status_code=403, content={"detail": "Not enough permissions"})
 
         return await call_next(request)
 
@@ -78,4 +90,3 @@ class ServiceHealthMiddleware(BaseHTTPMiddleware):
             ]
         )
         return response
-

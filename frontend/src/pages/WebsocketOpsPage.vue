@@ -1,11 +1,15 @@
 <script setup>
-import { onBeforeUnmount, reactive, ref } from 'vue'
+import { computed, onBeforeUnmount, reactive, ref } from 'vue'
 
 import JsonBlock from '../components/JsonBlock.vue'
 import SectionHeader from '../components/SectionHeader.vue'
 import { useApi } from '../composables/useApi'
+import { useAuth } from '../composables/useAuth'
+import { useUiPrefs } from '../composables/useUiPrefs'
 
 const { apiRequest, wsUrl, config } = useApi()
+const { isUserOrAdmin, isAdmin } = useAuth()
+const { language } = useUiPrefs()
 
 const errors = ref([])
 const statusStream = ref(null)
@@ -49,10 +53,139 @@ const adminForms = reactive({
   includeHistory: false,
   historyLimit: 20,
 })
+const userLocked = computed(() => !isUserOrAdmin.value)
+const adminLocked = computed(() => !isAdmin.value)
+
+const messages = {
+  ru: {
+    subtitle: 'Realtime-каналы + HTTP управление сессиями/соединениями + admin endpoint-ы.',
+    userRequired: 'Требуется вход с ролью user/admin',
+    adminRequired: 'Требуется роль admin',
+    userLockedHint:
+      'В гостевом режиме доступны только пассивные realtime-каналы. Управляющие HTTP операции требуют роль user/admin.',
+    adminLockedHint: "Админские WebSocket endpoint'ы доступны только admin.",
+    adminTokenHint: 'Токен берется из Backend Config. Требуется для `/api/v1/admin/*`.',
+    realtimeChannels: 'Realtime-каналы',
+    startStatus: 'Запустить /ws/status',
+    stopStatus: 'Остановить status stream',
+    startNotifications: 'Запустить /ws/notifications',
+    unsubscribeNotifications: 'Отписаться от notifications',
+    stopNotifications: 'Остановить notifications',
+    statusPayload: 'Payload потока статуса',
+    notificationsLog: 'Лог notifications',
+    httpWsEndpoints: 'HTTP endpoint-ы WebSocket Service',
+    sessionsLimit: 'Лимит сессий',
+    sessionsOffset: 'Смещение сессий',
+    sessionId: 'Session ID',
+    getSessions: 'GET sessions',
+    getSession: 'GET session',
+    postCancelSession: 'POST cancel session',
+    deleteSession: 'DELETE session',
+    getConnections: 'GET connections',
+    broadcastTopic: 'Broadcast topic (опционально)',
+    excludeIds: 'Исключить connection ID (CSV)',
+    broadcastMessageJson: 'Broadcast message JSON',
+    postBroadcast: 'POST broadcast',
+    sessions: 'Сессии',
+    sessionDetails: 'Детали сессии',
+    connections: 'Соединения',
+    broadcast: 'Broadcast',
+    cancelSession: 'Отмена сессии',
+    deleteSessionResult: 'Удаление сессии',
+    adminEndpoints: 'Admin endpoint-ы',
+    detailedConnections: 'Детализированные соединения',
+    connectionId: 'Connection ID',
+    sessionStatusFilter: 'Фильтр статуса сессий',
+    cleanupType: 'Тип cleanup',
+    includeHistory: 'Включить историю',
+    historyLimit: 'Лимит истории',
+    adminConnections: 'Admin connections',
+    adminConnectionDetails: 'Admin connection details',
+    adminDisconnect: 'Admin disconnect',
+    adminSessions: 'Admin sessions',
+    adminSessionStats: 'Admin session stats',
+    adminCleanup: 'Admin cleanup',
+    adminSystemInfo: 'Admin system info',
+    errors: 'Ошибки',
+    statusDisconnected: 'status stream отключен',
+    notificationsDisconnected: 'notifications stream отключен',
+    unknownError: 'неизвестная ошибка',
+  },
+  en: {
+    subtitle: 'Realtime channels + HTTP session/connection management + admin endpoints.',
+    userRequired: 'Login with user/admin role is required',
+    adminRequired: 'Admin role is required',
+    userLockedHint:
+      'In guest mode only passive realtime channels are available. HTTP control operations require user/admin role.',
+    adminLockedHint: "Admin WebSocket endpoints are available only for admin role.",
+    adminTokenHint: 'Token is taken from Backend Config. Required for `/api/v1/admin/*`.',
+    realtimeChannels: 'Realtime channels',
+    startStatus: 'Start /ws/status',
+    stopStatus: 'Stop status stream',
+    startNotifications: 'Start /ws/notifications',
+    unsubscribeNotifications: 'Unsubscribe notifications',
+    stopNotifications: 'Stop notifications',
+    statusPayload: 'Status Stream Payload',
+    notificationsLog: 'Notifications Log',
+    httpWsEndpoints: 'HTTP WebSocket endpoints',
+    sessionsLimit: 'Sessions limit',
+    sessionsOffset: 'Sessions offset',
+    sessionId: 'Session ID',
+    getSessions: 'GET sessions',
+    getSession: 'GET session',
+    postCancelSession: 'POST cancel session',
+    deleteSession: 'DELETE session',
+    getConnections: 'GET connections',
+    broadcastTopic: 'Broadcast topic (optional)',
+    excludeIds: 'Exclude connection IDs CSV',
+    broadcastMessageJson: 'Broadcast message JSON',
+    postBroadcast: 'POST broadcast',
+    sessions: 'Sessions',
+    sessionDetails: 'Session details',
+    connections: 'Connections',
+    broadcast: 'Broadcast',
+    cancelSession: 'Cancel session',
+    deleteSessionResult: 'Delete session',
+    adminEndpoints: 'Admin endpoints',
+    detailedConnections: 'Detailed connections',
+    connectionId: 'Connection ID',
+    sessionStatusFilter: 'Session status filter',
+    cleanupType: 'Cleanup type',
+    includeHistory: 'Include history',
+    historyLimit: 'History limit',
+    adminConnections: 'Admin connections',
+    adminConnectionDetails: 'Admin connection details',
+    adminDisconnect: 'Admin disconnect',
+    adminSessions: 'Admin sessions',
+    adminSessionStats: 'Admin session stats',
+    adminCleanup: 'Admin cleanup',
+    adminSystemInfo: 'Admin system info',
+    errors: 'Errors',
+    statusDisconnected: 'status stream disconnected',
+    notificationsDisconnected: 'notifications stream disconnected',
+    unknownError: 'unknown error',
+  },
+}
+
+function t(key) {
+  return messages[language.value]?.[key] || messages.en[key] || key
+}
 
 function addError(scope, error) {
-  const detail = error?.data?.detail || error?.message || 'unknown error'
+  const detail = error?.data?.detail || error?.message || t('unknownError')
   errors.value.unshift(`[${scope}] ${detail}`)
+}
+
+function requireUserPermission(scope) {
+  if (!userLocked.value) return true
+  addError(scope, { message: t('userRequired') })
+  return false
+}
+
+function requireAdminPermission(scope) {
+  if (!adminLocked.value) return true
+  addError(scope, { message: t('adminRequired') })
+  return false
 }
 
 function startStatusStream() {
@@ -66,7 +199,7 @@ function startStatusStream() {
     }
   }
   statusSocket.onerror = () => {
-    addError('ws/status', { message: 'status stream disconnected' })
+    addError('ws/status', { message: t('statusDisconnected') })
   }
 }
 
@@ -89,7 +222,7 @@ function startNotifications() {
     }
   }
   notificationsSocket.onerror = () => {
-    addError('ws/notifications', { message: 'notifications stream disconnected' })
+    addError('ws/notifications', { message: t('notificationsDisconnected') })
   }
 }
 
@@ -107,6 +240,7 @@ function stopNotifications() {
 }
 
 async function loadSessions() {
+  if (!requireUserPermission('ws sessions')) return
   try {
     const response = await apiRequest('websocket', '/api/v1/ws/sessions', {
       query: {
@@ -121,6 +255,7 @@ async function loadSessions() {
 }
 
 async function loadSessionDetails() {
+  if (!requireUserPermission('ws session details')) return
   if (!wsForms.sessionId) return
   try {
     const response = await apiRequest('websocket', `/api/v1/ws/sessions/${encodeURIComponent(wsForms.sessionId)}`)
@@ -131,6 +266,7 @@ async function loadSessionDetails() {
 }
 
 async function cancelSession() {
+  if (!requireUserPermission('ws session cancel')) return
   if (!wsForms.sessionId) return
   try {
     const response = await apiRequest('websocket', `/api/v1/ws/sessions/${encodeURIComponent(wsForms.sessionId)}/cancel`, {
@@ -143,6 +279,7 @@ async function cancelSession() {
 }
 
 async function deleteSession() {
+  if (!requireUserPermission('ws session delete')) return
   if (!wsForms.sessionId) return
   try {
     const response = await apiRequest('websocket', `/api/v1/ws/sessions/${encodeURIComponent(wsForms.sessionId)}`, {
@@ -155,6 +292,7 @@ async function deleteSession() {
 }
 
 async function loadConnections() {
+  if (!requireUserPermission('ws connections')) return
   try {
     const response = await apiRequest('websocket', '/api/v1/ws/connections')
     wsHttpOps.connections = response.data
@@ -164,6 +302,7 @@ async function loadConnections() {
 }
 
 async function broadcastMessage() {
+  if (!requireUserPermission('ws broadcast')) return
   try {
     const response = await apiRequest('websocket', '/api/v1/ws/broadcast', {
       method: 'POST',
@@ -195,6 +334,7 @@ function adminHeaders() {
 }
 
 async function adminLoadConnections() {
+  if (!requireAdminPermission('admin connections')) return
   try {
     const response = await apiRequest('websocket', '/api/v1/admin/connections', {
       query: {
@@ -209,6 +349,7 @@ async function adminLoadConnections() {
 }
 
 async function adminLoadConnectionDetails() {
+  if (!requireAdminPermission('admin connection details')) return
   if (!adminForms.connectionId) return
   try {
     const response = await apiRequest('websocket', `/api/v1/admin/connections/${encodeURIComponent(adminForms.connectionId)}`, {
@@ -225,6 +366,7 @@ async function adminLoadConnectionDetails() {
 }
 
 async function adminDisconnectConnection() {
+  if (!requireAdminPermission('admin disconnect')) return
   if (!adminForms.connectionId) return
   try {
     const response = await apiRequest('websocket', `/api/v1/admin/connections/${encodeURIComponent(adminForms.connectionId)}`, {
@@ -238,6 +380,7 @@ async function adminDisconnectConnection() {
 }
 
 async function adminLoadSessions() {
+  if (!requireAdminPermission('admin sessions')) return
   try {
     const response = await apiRequest('websocket', '/api/v1/admin/sessions', {
       query: {
@@ -254,6 +397,7 @@ async function adminLoadSessions() {
 }
 
 async function adminLoadSessionStats() {
+  if (!requireAdminPermission('admin session stats')) return
   try {
     const response = await apiRequest('websocket', '/api/v1/admin/sessions/stats', {
       query: {
@@ -268,6 +412,7 @@ async function adminLoadSessionStats() {
 }
 
 async function adminRunCleanup() {
+  if (!requireAdminPermission('admin cleanup')) return
   try {
     const response = await apiRequest('websocket', '/api/v1/admin/system/cleanup', {
       method: 'POST',
@@ -283,6 +428,7 @@ async function adminRunCleanup() {
 }
 
 async function adminLoadSystemInfo() {
+  if (!requireAdminPermission('admin system info')) return
   try {
     const response = await apiRequest('websocket', '/api/v1/admin/system/info', {
       headers: adminHeaders(),
@@ -301,74 +447,85 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="space-y-4">
-    <SectionHeader title="WebSocket Ops" subtitle="Realtime channels + HTTP session/connection management + admin endpoints." />
+    <SectionHeader title="WebSocket Ops" :subtitle="t('subtitle')" />
+
+    <section v-if="userLocked" class="panel border-amber-200 bg-amber-50 p-4">
+      <p class="text-sm text-amber-700">
+        {{ t('userLockedHint') }}
+      </p>
+    </section>
+    <section v-if="adminLocked" class="panel border-amber-200 bg-amber-50 p-4">
+      <p class="text-sm text-amber-700">
+        {{ t('adminLockedHint') }}
+      </p>
+    </section>
 
     <section class="panel p-4">
-      <h3 class="panel-title text-base">Realtime channels</h3>
+      <h3 class="panel-title text-base">{{ t('realtimeChannels') }}</h3>
       <div class="mt-3 flex flex-wrap gap-2">
-        <button class="btn-primary" @click="startStatusStream">Start /ws/status</button>
-        <button class="btn-secondary" @click="stopStatusStream">Stop status stream</button>
-        <button class="btn-primary" @click="startNotifications">Start /ws/notifications</button>
-        <button class="btn-secondary" @click="unsubscribeNotifications">Unsubscribe notifications</button>
-        <button class="btn-secondary" @click="stopNotifications">Stop notifications</button>
+        <button class="btn-primary" @click="startStatusStream">{{ t('startStatus') }}</button>
+        <button class="btn-secondary" @click="stopStatusStream">{{ t('stopStatus') }}</button>
+        <button class="btn-primary" @click="startNotifications">{{ t('startNotifications') }}</button>
+        <button class="btn-secondary" @click="unsubscribeNotifications">{{ t('unsubscribeNotifications') }}</button>
+        <button class="btn-secondary" @click="stopNotifications">{{ t('stopNotifications') }}</button>
       </div>
       <div class="mt-4 grid gap-4 xl:grid-cols-2">
-        <JsonBlock title="Status Stream Payload" :value="statusStream" />
-        <JsonBlock title="Notifications Log" :value="notificationsLog" />
+        <JsonBlock :title="t('statusPayload')" :value="statusStream" />
+        <JsonBlock :title="t('notificationsLog')" :value="notificationsLog" />
       </div>
     </section>
 
     <section class="panel p-4">
-      <h3 class="panel-title text-base">HTTP WebSocket endpoints</h3>
+      <h3 class="panel-title text-base">{{ t('httpWsEndpoints') }}</h3>
       <div class="mt-3 grid gap-3 md:grid-cols-3">
-        <label class="text-sm"><span class="mb-1 block">Sessions limit</span><input v-model.number="wsForms.sessionsLimit" type="number" class="form-input" /></label>
-        <label class="text-sm"><span class="mb-1 block">Sessions offset</span><input v-model.number="wsForms.sessionsOffset" type="number" class="form-input" /></label>
-        <label class="text-sm"><span class="mb-1 block">Session ID</span><input v-model="wsForms.sessionId" class="form-input" /></label>
+        <label class="text-sm"><span class="mb-1 block">{{ t('sessionsLimit') }}</span><input v-model.number="wsForms.sessionsLimit" type="number" class="form-input" /></label>
+        <label class="text-sm"><span class="mb-1 block">{{ t('sessionsOffset') }}</span><input v-model.number="wsForms.sessionsOffset" type="number" class="form-input" /></label>
+        <label class="text-sm"><span class="mb-1 block">{{ t('sessionId') }}</span><input v-model="wsForms.sessionId" class="form-input" /></label>
       </div>
 
       <div class="mt-3 flex flex-wrap gap-2">
-        <button class="btn-primary" @click="loadSessions">GET sessions</button>
-        <button class="btn-secondary" @click="loadSessionDetails">GET session</button>
-        <button class="btn-secondary" @click="cancelSession">POST cancel session</button>
-        <button class="btn-danger" @click="deleteSession">DELETE session</button>
-        <button class="btn-secondary" @click="loadConnections">GET connections</button>
+        <button class="btn-primary" :disabled="userLocked" @click="loadSessions">{{ t('getSessions') }}</button>
+        <button class="btn-secondary" :disabled="userLocked" @click="loadSessionDetails">{{ t('getSession') }}</button>
+        <button class="btn-secondary" :disabled="userLocked" @click="cancelSession">{{ t('postCancelSession') }}</button>
+        <button class="btn-danger" :disabled="userLocked" @click="deleteSession">{{ t('deleteSession') }}</button>
+        <button class="btn-secondary" :disabled="userLocked" @click="loadConnections">{{ t('getConnections') }}</button>
       </div>
 
       <div class="mt-3 grid gap-3">
-        <label class="text-sm"><span class="mb-1 block">Broadcast topic (optional)</span><input v-model="wsForms.broadcastTopic" class="form-input" /></label>
-        <label class="text-sm"><span class="mb-1 block">Exclude connection IDs CSV</span><input v-model="wsForms.broadcastExclude" class="form-input" /></label>
-        <label class="text-sm"><span class="mb-1 block">Broadcast message JSON</span><textarea v-model="wsForms.broadcastMessage" class="form-input h-20 font-mono"></textarea></label>
-        <button class="btn-primary w-fit" @click="broadcastMessage">POST broadcast</button>
+        <label class="text-sm"><span class="mb-1 block">{{ t('broadcastTopic') }}</span><input v-model="wsForms.broadcastTopic" class="form-input" /></label>
+        <label class="text-sm"><span class="mb-1 block">{{ t('excludeIds') }}</span><input v-model="wsForms.broadcastExclude" class="form-input" /></label>
+        <label class="text-sm"><span class="mb-1 block">{{ t('broadcastMessageJson') }}</span><textarea v-model="wsForms.broadcastMessage" class="form-input h-20 font-mono"></textarea></label>
+        <button class="btn-primary w-fit" :disabled="userLocked" @click="broadcastMessage">{{ t('postBroadcast') }}</button>
       </div>
 
       <div class="mt-4 grid gap-4 xl:grid-cols-2">
-        <JsonBlock title="Sessions" :value="wsHttpOps.sessions" />
-        <JsonBlock title="Session details" :value="wsHttpOps.sessionDetails" />
-        <JsonBlock title="Connections" :value="wsHttpOps.connections" />
-        <JsonBlock title="Broadcast" :value="wsHttpOps.broadcast" />
-        <JsonBlock title="Cancel session" :value="wsHttpOps.cancel" />
-        <JsonBlock title="Delete session" :value="wsHttpOps.remove" />
+        <JsonBlock :title="t('sessions')" :value="wsHttpOps.sessions" />
+        <JsonBlock :title="t('sessionDetails')" :value="wsHttpOps.sessionDetails" />
+        <JsonBlock :title="t('connections')" :value="wsHttpOps.connections" />
+        <JsonBlock :title="t('broadcast')" :value="wsHttpOps.broadcast" />
+        <JsonBlock :title="t('cancelSession')" :value="wsHttpOps.cancel" />
+        <JsonBlock :title="t('deleteSessionResult')" :value="wsHttpOps.remove" />
       </div>
     </section>
 
-    <section class="panel p-4">
-      <h3 class="panel-title text-base">Admin endpoints</h3>
-      <p class="mt-1 text-sm text-slate-600">Токен берется из Backend Config. Требуется для `/api/v1/admin/*`.</p>
+    <section v-if="!adminLocked" class="panel p-4">
+      <h3 class="panel-title text-base">{{ t('adminEndpoints') }}</h3>
+      <p class="mt-1 text-sm text-slate-600">{{ t('adminTokenHint') }}</p>
 
       <div class="mt-3 grid gap-3 md:grid-cols-2 lg:grid-cols-4">
         <label class="inline-flex items-center gap-2 text-sm lg:col-span-2">
-          <input v-model="adminForms.detailedConnections" type="checkbox" class="h-4 w-4" /> Detailed connections
+          <input v-model="adminForms.detailedConnections" type="checkbox" class="h-4 w-4" /> {{ t('detailedConnections') }}
         </label>
         <label class="text-sm">
-          <span class="mb-1 block">Connection ID</span>
+          <span class="mb-1 block">{{ t('connectionId') }}</span>
           <input v-model="adminForms.connectionId" class="form-input" />
         </label>
         <label class="text-sm">
-          <span class="mb-1 block">Session status filter</span>
+          <span class="mb-1 block">{{ t('sessionStatusFilter') }}</span>
           <input v-model="adminForms.adminSessionStatus" class="form-input" />
         </label>
         <label class="text-sm">
-          <span class="mb-1 block">Cleanup type</span>
+          <span class="mb-1 block">{{ t('cleanupType') }}</span>
           <select v-model="adminForms.adminCleanupType" class="form-input">
             <option value="all">all</option>
             <option value="sessions">sessions</option>
@@ -377,36 +534,36 @@ onBeforeUnmount(() => {
           </select>
         </label>
         <label class="inline-flex items-center gap-2 text-sm">
-          <input v-model="adminForms.includeHistory" type="checkbox" class="h-4 w-4" /> Include history
+          <input v-model="adminForms.includeHistory" type="checkbox" class="h-4 w-4" /> {{ t('includeHistory') }}
         </label>
         <label class="text-sm">
-          <span class="mb-1 block">History limit</span>
+          <span class="mb-1 block">{{ t('historyLimit') }}</span>
           <input v-model.number="adminForms.historyLimit" type="number" class="form-input" />
         </label>
       </div>
 
       <div class="mt-3 flex flex-wrap gap-2">
-        <button class="btn-primary" @click="adminLoadConnections">Admin connections</button>
-        <button class="btn-secondary" @click="adminLoadConnectionDetails">Admin connection details</button>
-        <button class="btn-danger" @click="adminDisconnectConnection">Admin disconnect</button>
-        <button class="btn-secondary" @click="adminLoadSessions">Admin sessions</button>
-        <button class="btn-secondary" @click="adminLoadSessionStats">Admin session stats</button>
-        <button class="btn-secondary" @click="adminRunCleanup">Admin cleanup</button>
-        <button class="btn-secondary" @click="adminLoadSystemInfo">Admin system info</button>
+        <button class="btn-primary" @click="adminLoadConnections">{{ t('adminConnections') }}</button>
+        <button class="btn-secondary" @click="adminLoadConnectionDetails">{{ t('adminConnectionDetails') }}</button>
+        <button class="btn-danger" @click="adminDisconnectConnection">{{ t('adminDisconnect') }}</button>
+        <button class="btn-secondary" @click="adminLoadSessions">{{ t('adminSessions') }}</button>
+        <button class="btn-secondary" @click="adminLoadSessionStats">{{ t('adminSessionStats') }}</button>
+        <button class="btn-secondary" @click="adminRunCleanup">{{ t('adminCleanup') }}</button>
+        <button class="btn-secondary" @click="adminLoadSystemInfo">{{ t('adminSystemInfo') }}</button>
       </div>
 
       <div class="mt-4 grid gap-4 xl:grid-cols-2">
-        <JsonBlock title="Admin connections" :value="adminOps.connections" />
-        <JsonBlock title="Admin connection details" :value="adminOps.connectionDetails" />
-        <JsonBlock title="Admin sessions" :value="adminOps.sessions" />
-        <JsonBlock title="Admin session stats" :value="adminOps.sessionStats" />
-        <JsonBlock title="Admin cleanup" :value="adminOps.cleanup" />
-        <JsonBlock title="Admin system info" :value="adminOps.systemInfo" />
+        <JsonBlock :title="t('adminConnections')" :value="adminOps.connections" />
+        <JsonBlock :title="t('adminConnectionDetails')" :value="adminOps.connectionDetails" />
+        <JsonBlock :title="t('adminSessions')" :value="adminOps.sessions" />
+        <JsonBlock :title="t('adminSessionStats')" :value="adminOps.sessionStats" />
+        <JsonBlock :title="t('adminCleanup')" :value="adminOps.cleanup" />
+        <JsonBlock :title="t('adminSystemInfo')" :value="adminOps.systemInfo" />
       </div>
     </section>
 
     <section v-if="errors.length" class="panel border-rose-200 bg-rose-50 p-4">
-      <h3 class="panel-title text-base text-rose-700">Errors</h3>
+      <h3 class="panel-title text-base text-rose-700">{{ t('errors') }}</h3>
       <ul class="mt-2 list-disc space-y-1 pl-5 text-sm text-rose-700">
         <li v-for="item in errors" :key="item">{{ item }}</li>
       </ul>

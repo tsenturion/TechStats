@@ -5,9 +5,11 @@ from typing import Dict, List, Set, Any, Optional
 from pathlib import Path
 import asyncio
 import structlog
+from flashtext import KeywordProcessor
 
 from config import settings
 from app.cache import cache_manager
+from app.patterns_repository import PatternsRepository
 
 logger = structlog.get_logger()
 
@@ -20,6 +22,8 @@ class TechPatternsLoader:
         self.compiled_patterns: Dict[str, re.Pattern] = {}
         self.categories: Set[str] = set()
         self.aliases: Dict[str, str] = {}  # alias -> main_technology
+        self.keyword_processor = KeywordProcessor(case_sensitive=False)
+        self.repository = PatternsRepository(settings.patterns_database_url)
         
     async def load_patterns(self):
         """Загрузка паттернов из файла и кэша"""
@@ -31,8 +35,15 @@ class TechPatternsLoader:
             self.patterns = cached.get("patterns", {})
             self.categories = set(cached.get("categories", []))
             self.aliases = cached.get("aliases", {})
+            self._build_aliases()
             self._compile_patterns()
             logger.info("Patterns loaded from cache", count=len(self.patterns))
+            return
+
+        # Попытка загрузки из SQLAlchemy-хранилища
+        if await self._load_patterns_from_db():
+            await self._cache_patterns()
+            logger.info("Patterns loaded from SQL database", count=len(self.patterns))
             return
         
         # Загрузка из файла
@@ -44,9 +55,30 @@ class TechPatternsLoader:
             await self._save_patterns_to_file()
         else:
             await self._load_patterns_from_file(patterns_file)
-        
-        # Кэширование паттернов
+
+        # Синхронизация с SQL-хранилищем и кэширование
+        await self._save_patterns_to_db()
         await self._cache_patterns()
+
+    async def _load_patterns_from_db(self) -> bool:
+        try:
+            loaded = await asyncio.to_thread(self.repository.load_all)
+            if not loaded:
+                return False
+            self.patterns = loaded
+            self.categories = {str(item.get("category", "other")) for item in loaded.values()}
+            self._build_aliases()
+            self._compile_patterns()
+            return True
+        except Exception as exc:
+            logger.warning("Failed to load patterns from SQL database", error=str(exc))
+            return False
+
+    async def _save_patterns_to_db(self):
+        try:
+            await asyncio.to_thread(self.repository.save_all, self.patterns)
+        except Exception as exc:
+            logger.warning("Failed to save patterns to SQL database", error=str(exc))
     
     async def _load_patterns_from_file(self, patterns_file: Path):
         """Загрузка паттернов из JSON файла"""
@@ -57,7 +89,7 @@ class TechPatternsLoader:
             self.patterns = data.get("patterns", {})
             self.categories = set(data.get("categories", []))
             self.aliases = data.get("aliases", {})
-            
+            self._build_aliases()
             self._compile_patterns()
             logger.info("Patterns loaded from file", count=len(self.patterns))
             
@@ -106,6 +138,19 @@ class TechPatternsLoader:
                 "aliases": ["java8", "java11", "java17", "spring", "hibernate"],
                 "description": "Язык программирования Java и его экосистема"
             },
+            "csharp": {
+                "name": "C#",
+                "category": "programming_language",
+                "patterns": [
+                    r'(?<!\w)c#(?!\w)',
+                    r'\bcsharp\b',
+                    r'\bc\s*sharp\b',
+                    r'(?<!\w)asp\.?net(?!\w)'
+                ],
+                "weight": 1.0,
+                "aliases": ["c#", "csharp", "c sharp", "asp.net", "aspnet"],
+                "description": "Язык программирования C# и платформа ASP.NET"
+            },
             "javascript": {
                 "name": "JavaScript",
                 "category": "programming_language",
@@ -123,8 +168,20 @@ class TechPatternsLoader:
                     r'\bnestjs\b'
                 ],
                 "weight": 1.0,
-                "aliases": ["js", "node", "nodejs", "ts", "typescript", "react", "angular", "vue"],
+                "aliases": ["js", "node", "nodejs", "ts", "typescript", "angular", "vue"],
                 "description": "JavaScript и его фреймворки"
+            },
+            "react": {
+                "name": "React",
+                "category": "framework",
+                "patterns": [
+                    r'\breact\b',
+                    r'\breact\.?js\b',
+                    r'\breactjs\b'
+                ],
+                "weight": 1.0,
+                "aliases": ["reactjs", "react.js"],
+                "description": "React framework"
             },
             "sql": {
                 "name": "SQL",
@@ -230,9 +287,27 @@ class TechPatternsLoader:
         for tech_id, tech_data in self.patterns.items():
             for alias in tech_data.get("aliases", []):
                 self.aliases[alias.lower()] = tech_id
+        self._rebuild_keyword_processor()
+
+    def _rebuild_keyword_processor(self):
+        self.keyword_processor = KeywordProcessor(case_sensitive=False)
+        for tech_id, tech_data in self.patterns.items():
+            candidates = set()
+            candidates.add(str(tech_id))
+            name = tech_data.get("name")
+            if name:
+                candidates.add(str(name))
+            for alias in tech_data.get("aliases", []):
+                candidates.add(str(alias))
+
+            for candidate in candidates:
+                normalized = candidate.strip()
+                if normalized:
+                    self.keyword_processor.add_keyword(normalized, tech_id)
     
     def _compile_patterns(self):
         """Компиляция regex паттернов"""
+        self.compiled_patterns = {}
         for tech_id, tech_data in self.patterns.items():
             patterns = tech_data.get("patterns", [])
             if patterns:
@@ -330,6 +405,12 @@ class TechPatternsLoader:
     def get_all_patterns(self) -> Dict[str, Dict[str, Any]]:
         """Получение всех паттернов"""
         return self.patterns.copy()
+
+    def extract_candidate_technologies(self, text: str) -> Set[str]:
+        if not text:
+            return set()
+        hits = self.keyword_processor.extract_keywords(text)
+        return {str(hit).lower() for hit in hits}
     
     def get_categories(self) -> List[str]:
         """Получение всех категорий"""
@@ -374,6 +455,7 @@ class TechPatternsLoader:
         if aliases:
             for alias in aliases:
                 self.aliases[alias.lower()] = tech_id
+        self._build_aliases()
         
         # Перекомпиляция паттерна
         combined_pattern = '|'.join(f'({p})' for p in patterns)
@@ -406,11 +488,13 @@ class TechPatternsLoader:
         # Удаление паттерна
         del self.patterns[tech_id]
         del self.compiled_patterns[tech_id]
+        self._build_aliases()
         
         logger.info("Pattern removed", tech_id=tech_id)
         return True
     
     async def save_and_cache(self):
         """Сохранение паттернов в файл и кэш"""
+        await self._save_patterns_to_db()
         await self._save_patterns_to_file()
         await self._cache_patterns()

@@ -1,7 +1,6 @@
 # C:\Users\user\Desktop\TechStats\api-gateway\config.py
 from pydantic_settings import BaseSettings
-from typing import List, Optional
-import os
+from typing import List
 
 
 class Settings(BaseSettings):
@@ -39,6 +38,12 @@ class Settings(BaseSettings):
     jwt_secret_key: str = "your-secret-key-change-in-production"
     jwt_algorithm: str = "HS256"
     jwt_access_token_expire_minutes: int = 30
+
+    # Built-in accounts for role-based access
+    admin_username: str = "admin"
+    admin_password: str = "admin"
+    user_username: str = "user"
+    user_password: str = "user"
     
     class Config:
         env_file = ".env"

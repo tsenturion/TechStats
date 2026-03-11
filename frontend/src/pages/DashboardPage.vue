@@ -5,14 +5,65 @@ import SectionHeader from '../components/SectionHeader.vue'
 import ServiceCard from '../components/ServiceCard.vue'
 import JsonBlock from '../components/JsonBlock.vue'
 import { useApi } from '../composables/useApi'
+import { useUiPrefs } from '../composables/useUiPrefs'
 
 const { config, apiRequest, wsUrl } = useApi()
+const { language } = useUiPrefs()
 
 const loading = ref(false)
 const gatewayServices = ref(null)
 const dashboardErrors = ref([])
 const liveMetrics = ref(null)
 const rawHealthPayloads = reactive({})
+
+const messages = {
+  ru: {
+    subtitle: 'Состояние всех микросервисов, включая live WebSocket telemetry.',
+    title: 'Обзор платформы',
+    refresh: 'Обновить',
+    refreshing: 'Обновление...',
+    quickLinks: 'Быстрые ссылки',
+    gatewayDocs: 'Gateway Docs',
+    vacancyDocs: 'Vacancy Docs',
+    healthServicesPayload: 'Gateway -> /api/v1/health/services',
+    liveMetricsPayload: 'Live Metrics Stream (/api/v1/ws/metrics)',
+    vacancyHealthPayload: 'Payload здоровья Vacancy Service',
+    analyzerHealthPayload: 'Payload здоровья Analyzer Service',
+    cacheHealthPayload: 'Payload здоровья Cache Service',
+    websocketHealthPayload: 'Payload здоровья WebSocket Service',
+    errors: 'Ошибки',
+    liveMetricsDisconnected: 'Поток live метрик отключен',
+    requestFailed: 'Запрос завершился ошибкой',
+    unknownError: 'неизвестная ошибка',
+    failedGatewayChecks: 'Не удалось загрузить проверки сервисов Gateway',
+    ok: 'ok',
+  },
+  en: {
+    subtitle: 'Status of all microservices, including live WebSocket telemetry.',
+    title: 'Platform Overview',
+    refresh: 'Refresh',
+    refreshing: 'Refreshing...',
+    quickLinks: 'Quick Links',
+    gatewayDocs: 'Gateway Docs',
+    vacancyDocs: 'Vacancy Docs',
+    healthServicesPayload: 'Gateway -> /api/v1/health/services',
+    liveMetricsPayload: 'Live Metrics Stream (/api/v1/ws/metrics)',
+    vacancyHealthPayload: 'Vacancy Health Payload',
+    analyzerHealthPayload: 'Analyzer Health Payload',
+    cacheHealthPayload: 'Cache Health Payload',
+    websocketHealthPayload: 'WebSocket Health Payload',
+    errors: 'Errors',
+    liveMetricsDisconnected: 'Live metrics stream disconnected',
+    requestFailed: 'Request failed',
+    unknownError: 'unknown error',
+    failedGatewayChecks: 'Failed to load gateway service checks',
+    ok: 'ok',
+  },
+}
+
+function t(key) {
+  return messages[language.value]?.[key] || messages.en[key] || key
+}
 
 const services = reactive([
   { key: 'gateway', name: 'API Gateway', path: '/api/v1/health', status: 'unknown', details: '', latency: '' },
@@ -32,14 +83,14 @@ async function pingService(target) {
     const status = response.data?.status || (response.status === 200 ? 'healthy' : 'degraded')
     target.status = status
     target.latency = `${elapsed.toFixed(0)} ms`
-    target.details = response.data?.service || 'ok'
+    target.details = response.data?.service || t('ok')
     rawHealthPayloads[target.key] = response.data
   } catch (error) {
     target.status = 'error'
-    target.details = error?.message || 'Request failed'
+    target.details = error?.message || t('requestFailed')
     target.latency = '-'
-    rawHealthPayloads[target.key] = error?.data || { message: error?.message || 'unknown error' }
-    dashboardErrors.value.push(`[${target.name}] ${error?.message || 'request failed'}`)
+    rawHealthPayloads[target.key] = error?.data || { message: error?.message || t('unknownError') }
+    dashboardErrors.value.push(`[${target.name}] ${error?.message || t('requestFailed')}`)
   }
 }
 
@@ -53,7 +104,7 @@ async function refreshDashboard() {
     const response = await apiRequest('gateway', '/api/v1/health/services')
     gatewayServices.value = response.data
   } catch (error) {
-    gatewayServices.value = { error: error?.message || 'Failed to load gateway service checks' }
+    gatewayServices.value = { error: error?.message || t('failedGatewayChecks') }
   } finally {
     loading.value = false
   }
@@ -77,7 +128,7 @@ function startMetricsStream() {
   }
 
   metricsSocket.onerror = () => {
-    dashboardErrors.value.push('Live metrics stream disconnected')
+    dashboardErrors.value.push(t('liveMetricsDisconnected'))
   }
 }
 
@@ -100,8 +151,8 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="space-y-4">
-    <SectionHeader title="Platform Overview" subtitle="Состояние всех микросервисов, включая live WebSocket telemetry.">
-      <button class="btn-primary" :disabled="loading" @click="refreshDashboard">{{ loading ? 'Refreshing...' : 'Refresh' }}</button>
+    <SectionHeader :title="t('title')" :subtitle="t('subtitle')">
+      <button class="btn-primary" :disabled="loading" @click="refreshDashboard">{{ loading ? t('refreshing') : t('refresh') }}</button>
     </SectionHeader>
 
     <div class="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
@@ -117,32 +168,32 @@ onBeforeUnmount(() => {
     </div>
 
     <section class="panel p-4">
-      <h3 class="panel-title text-base">Quick Links</h3>
+      <h3 class="panel-title text-base">{{ t('quickLinks') }}</h3>
       <div class="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
-        <a class="btn-secondary justify-start" :href="`${config.gateway}/docs`" target="_blank" rel="noreferrer">Gateway Docs</a>
-        <a class="btn-secondary justify-start" :href="`${config.vacancy}/docs`" target="_blank" rel="noreferrer">Vacancy Docs</a>
+        <a class="btn-secondary justify-start" :href="`${config.gateway}/docs`" target="_blank" rel="noreferrer">{{ t('gatewayDocs') }}</a>
+        <a class="btn-secondary justify-start" :href="`${config.vacancy}/docs`" target="_blank" rel="noreferrer">{{ t('vacancyDocs') }}</a>
         <a class="btn-secondary justify-start" :href="config.prometheus" target="_blank" rel="noreferrer">Prometheus</a>
         <a class="btn-secondary justify-start" :href="config.grafana" target="_blank" rel="noreferrer">Grafana</a>
       </div>
     </section>
 
     <div class="grid gap-4 lg:grid-cols-2">
-      <JsonBlock title="Gateway -> /api/v1/health/services" :value="gatewayServices" max-height="18rem" />
-      <JsonBlock title="Live Metrics Stream (/api/v1/ws/metrics)" :value="liveMetrics" max-height="18rem" />
+      <JsonBlock :title="t('healthServicesPayload')" :value="gatewayServices" max-height="18rem" />
+      <JsonBlock :title="t('liveMetricsPayload')" :value="liveMetrics" max-height="18rem" />
     </div>
 
     <div class="grid gap-4 lg:grid-cols-2">
-      <JsonBlock title="Vacancy Health Payload" :value="rawHealthPayloads.vacancy" max-height="16rem" />
-      <JsonBlock title="Analyzer Health Payload" :value="rawHealthPayloads.analyzer" max-height="16rem" />
+      <JsonBlock :title="t('vacancyHealthPayload')" :value="rawHealthPayloads.vacancy" max-height="16rem" />
+      <JsonBlock :title="t('analyzerHealthPayload')" :value="rawHealthPayloads.analyzer" max-height="16rem" />
     </div>
 
     <div class="grid gap-4 lg:grid-cols-2">
-      <JsonBlock title="Cache Health Payload" :value="rawHealthPayloads.cache" max-height="16rem" />
-      <JsonBlock title="WebSocket Health Payload" :value="rawHealthPayloads.websocket" max-height="16rem" />
+      <JsonBlock :title="t('cacheHealthPayload')" :value="rawHealthPayloads.cache" max-height="16rem" />
+      <JsonBlock :title="t('websocketHealthPayload')" :value="rawHealthPayloads.websocket" max-height="16rem" />
     </div>
 
     <section v-if="dashboardErrors.length" class="panel border-rose-200 bg-rose-50 p-4">
-      <h3 class="panel-title text-base text-rose-700">Errors</h3>
+      <h3 class="panel-title text-base text-rose-700">{{ t('errors') }}</h3>
       <ul class="mt-2 list-disc space-y-1 pl-5 text-sm text-rose-700">
         <li v-for="item in dashboardErrors" :key="item">{{ item }}</li>
       </ul>

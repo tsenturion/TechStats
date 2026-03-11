@@ -1,364 +1,85 @@
-# TechStats API - MVP Сервиса Анализа Вакансий
+# TechStats
 
-![Python](https://img.shields.io/badge/python-3.8+-blue.svg)
-![FastAPI](https://img.shields.io/badge/FastAPI-0.104.1-green.svg)
-![License](https://img.shields.io/badge/license-MIT-blue.svg)
+TechStats — микросервисная платформа для анализа вакансий HH.ru с прогрессом в realtime, отслеживанием KPI, runtime-настройками лимитов и наблюдаемостью.
 
-Веб-сервис для анализа востребованности технологий в IT-вакансиях с HeadHunter.ru
+## Возможности
 
-## 🚀 Основные возможности
+- Поиск вакансий и загрузка деталей через API Gateway
+- Поиск технологии в заголовке, сниппете и полном описании
+- Вывод KPI: `tech_percentage` и `tech_vacancies/total_vacancies`
+- Realtime-пайплайн анализа через WebSocket + синхронный REST fallback
+- Ролевой доступ: `guest` / `user` / `admin`
+- Админ-интерфейс для runtime-настроек (лимиты, задержки, batch, дефолты форм)
+- Стек мониторинга Prometheus + Grafana
 
-- ✅ Поиск вакансий по названию (точный и неточный поиск)
-- ✅ Анализ наличия технологий в описаниях вакансий
-- ✅ Статистика с процентным соотношением
-- ✅ Список всех найденных вакансий с технологией
-- ✅ **Умное кэширование с проверкой актуальности** (TTL 24 часа)
-- ✅ **Прогресс анализа в реальном времени через WebSocket**
-- ✅ **Визуализация работы кэша** (процент попаданий)
-- ✅ Rate limiting для соблюдения лимитов HH API
-- ✅ Параллельная обработка вакансий
-- ✅ REST API и веб-интерфейс
-
-## 📋 Требования
-
-- Python 3.8+
-- pip (менеджер пакетов Python)
-
-## 🤖 Установка и запуск через Docker
+## Быстрый старт
 
 ```bash
-# Для новых версий Docker
-docker compose up
-
-# Для старых версий Docker
-docker-compose up
+docker compose up -d --build
 ```
 
-Затем откройте в браузере: `http://localhost:8080/index.html`
-
-## 🛠️ Установка
-
-### 1. Клонируйте репозиторий или создайте проект
+Остановка:
 
 ```bash
-mkdir techstats
-cd techstats
+docker compose down
 ```
 
-### 2. Создайте виртуальное окружение
+## Основные URL
+
+- Frontend: `http://localhost:8088`
+- API Gateway: `http://localhost:8000`
+- Vacancy Service: `http://localhost:8001`
+- Analyzer Service: `http://localhost:8002`
+- Cache Service: `http://localhost:8003`
+- WebSocket Service: `http://localhost:8004`
+- Prometheus: `http://localhost:9090`
+- Grafana: `http://localhost:3000` (`admin/admin`)
+
+## Учетные записи по умолчанию
+
+- `admin / admin`
+- `user / user`
+- без входа (`guest`) для read-only/public сценариев
+
+## Сервисы
+
+- `frontend` (`:8088`) — SPA-интерфейс
+- `api-gateway` (`:8000`) — входная точка, proxy, auth, aggregation
+- `vacancy-service` (`:8001`) — поиск и детали вакансий через HH API
+- `analyzer-service` (`:8002`) — анализ технологий и статистика
+- `cache-service` (`:8003`) — API кэша, админ и cluster-операции
+- `websocket-service` (`:8004`) — realtime-сессии и стримы анализа
+
+## API Документация
+
+- Gateway: `http://localhost:8000/docs`
+- Vacancy: `http://localhost:8001/docs`
+- Analyzer: `http://localhost:8002/docs`
+- Cache: `http://localhost:8003/docs`
+- WebSocket Service: `http://localhost:8004/docs`
+
+## Полная документация
+
+Полная документация проекта доступна прямо в интерфейсе сайта:
+
+- Откройте `http://localhost:8088`
+- Перейдите в раздел `Documentation` в левом меню
+
+## Тестирование
+
+Запуск тестов по сервисам:
 
 ```bash
-# Windows
-python -m venv venv
-venv\Scripts\activate
-
-# Linux/macOS
-python3 -m venv venv
-source venv/bin/activate
+pytest -q shared/tests
+pytest -q api-gateway/tests
+pytest -q vacancy-service/tests
+pytest -q analyzer-service/tests
+pytest -q websocket-service/tests
+pytest -q tests/integration/test_gateway_rbac_runtime_integration.py
 ```
 
-### 3. Установите зависимости
+Только интеграционные:
 
 ```bash
-pip install -r requirements.txt
+pytest -q -m integration
 ```
-
-## 🚀 Запуск
-
-### Запуск API сервера
-
-```bash
-python app.py
-```
-
-Или с помощью uvicorn:
-
-```bash
-uvicorn app:app --reload --host 0.0.0.0 --port 8000
-```
-
-API будет доступен по адресу: `http://localhost:8000`
-
-### Открытие веб-интерфейса
-
-Просто откройте файл `index.html` в браузере или запустите простой HTTP сервер:
-
-```bash
-# Python 3
-python -m http.server 8080
-```
-
-Затем откройте в браузере: `http://localhost:8080/index.html`
-
-## 📚 API Документация
-
-После запуска сервера документация доступна по адресу: `http://localhost:8000/docs`
-
-### Основные эндпоинты
-
-#### WebSocket `/ws/analyze` - Анализ с прогрессом (РЕКОМЕНДУЕТСЯ)
-
-Используйте WebSocket для получения прогресса анализа в реальном времени.
-
-Отправляемые данные:
-```json
-{
-  "vacancy_title": "Data Engineer",
-  "technology": "Python",
-  "exact_search": true,
-  "area": 113,
-  "max_pages": 10
-}
-```
-
-Получаемые сообщения (примеры):
-
-**Этап 1 - Загрузка вакансий:**
-```json
-{
-  "stage": "fetching_vacancies",
-  "message": "Найдено 850 вакансий на 9 страницах",
-  "progress": 10,
-  "found": 850,
-  "pages": 9,
-  "real_requests": 1,
-  "cached_requests": 0
-}
-```
-
-**Этап 2 - Анализ:**
-```json
-{
-  "stage": "analyzing",
-  "message": "Обработано вакансий: 400/850",
-  "progress": 75,
-  "processed": 400,
-  "total": 850,
-  "found_with_tech": 320,
-  "real_requests": 45,
-  "cached_requests": 355,
-  "cache_hit_rate": 88.8
-}
-```
-
-**Финальный результат:**
-```json
-{
-  "stage": "finished",
-  "data": {
-    "vacancy_title": "Data Engineer",
-    "technology": "Python",
-    "total_vacancies": 850,
-    "tech_vacancies": 680,
-    "tech_percentage": 80.0,
-    "vacancies_with_tech": [...],
-    "request_stats": {
-      "real_requests": 45,
-      "cached_requests": 805,
-      "total_requests": 850,
-      "cache_hit_rate": 94.7
-    }
-  }
-}
-```
-
-#### GET `/health` - Проверка статуса
-
-```json
-{
-  "status": "healthy",
-  "timestamp": "2024-11-29T12:00:00",
-  "cache_size": 850
-}
-```
-
-#### GET `/cache/stats` - Статистика кэша
-
-```json
-{
-  "cache_size": 850,
-  "real_requests": 45,
-  "cached_requests": 805,
-  "total_requests": 850,
-  "cache_hit_rate": 94.7,
-  "cache_ttl_hours": 24,
-  "expiring_soon": 12
-}
-```
-
-**Примечание:** Кэш автоматически очищается от устаревших записей (старше 24 часов). При повторном анализе той же вакансии данные берутся из кэша, если они актуальны.
-
-#### DELETE `/cache/clear` - Очистка кэша
-
-```json
-{
-  "message": "Кэш успешно очищен",
-  "cleared_items": 850
-}
-```
-
-## 🎯 Примеры использования
-
-### Через веб-интерфейс (РЕКОМЕНДУЕТСЯ)
-
-1. Откройте `index.html` в браузере
-2. Заполните поля:
-   - Название вакансии: `System Analyst`
-   - Технология: `UML`
-   - Отметьте "Точный поиск" для поиска по точному соответствию
-3. Нажмите "Начать анализ"
-4. **Наблюдайте за прогрессом в реальном времени:**
-   - Загрузка вакансий (0-50%)
-   - Анализ вакансий (50-95%)
-   - Завершение (100%)
-5. **Обратите внимание на индикатор кэша:**
-   - 🎯 Зеленый значок = высокий процент попаданий в кэш (>50%)
-   - 🎯 Оранжевый значок = низкий процент попаданий (<50%)
-
-### Пример работы кэша
-
-**Первый запрос:** `System Analyst` + `UML`
-- Реальных запросов: 45
-- Из кэша: 0
-- Попадание в кэш: 0%
-
-**Второй запрос:** `System Analyst` + `BPMN` (те же вакансии!)
-- Реальных запросов: 1-5 (только новые вакансии)
-- Из кэша: 840-845
-- Попадание в кэш: **~99%** 🎯
-
-Это значит, что описания вакансий берутся из кэша и анализ проходит **в 10-20 раз быстрее**!
-
-### Через API (curl)
-
-```bash
-# Не рекомендуется - используйте WebSocket для получения прогресса
-# WebSocket подключение требует специального клиента
-```
-
-### Через Python с WebSocket
-
-```python
-import asyncio
-import websockets
-import json
-
-async def analyze_vacancies():
-    uri = "ws://localhost:8000/ws/analyze"
-    
-    async with websockets.connect(uri) as websocket:
-        # Отправляем запрос
-        request = {
-            'vacancy_title': 'System Analyst',
-            'technology': 'UML',
-            'exact_search': True,
-            'area': 113,
-            'max_pages': 10
-        }
-        await websocket.send(json.dumps(request))
-        
-        # Получаем сообщения о прогрессе
-        while True:
-            message = await websocket.recv()
-            data = json.loads(message)
-            
-            print(f"[{data['stage']}] {data.get('message', '')}")
-            
-            if data['stage'] == 'analyzing':
-                print(f"  Прогресс: {data['progress']}%")
-                print(f"  Попадание в кэш: {data.get('cache_hit_rate', 0)}%")
-            
-            if data['stage'] == 'finished':
-                result = data['data']
-                print(f"\nРезультаты:")
-                print(f"  Всего вакансий: {result['total_vacancies']}")
-                print(f"  С технологией: {result['tech_vacancies']} ({result['tech_percentage']:.1f}%)")
-                print(f"  Кэш: {result['request_stats']['cache_hit_rate']}% попаданий")
-                break
-            
-            if data['stage'] == 'error':
-                print(f"Ошибка: {data['message']}")
-                break
-
-asyncio.run(analyze_vacancies())
-```
-
-## ⚙️ Настройки
-
-В файле `main.py` можно изменить следующие параметры:
-
-```python
-MAX_WORKERS = 5                    # Количество параллельных потоков
-REQUEST_DELAY = 0.1                # Задержка между запросами (сек)
-MAX_REQUESTS_PER_SECOND = 7        # Максимум запросов в секунду
-CACHE_TTL_HOURS = 24               # Время жизни кэша (часов)
-```
-
-### Как работает кэш
-
-1. **При первом запросе** описание каждой вакансии загружается с HH.ru API и сохраняется в кэш с временной меткой
-2. **При повторном запросе** (например, анализ той же вакансии с другой технологией):
-   - Проверяется наличие вакансии в кэше
-   - Проверяется актуальность (не старше 24 часов)
-   - Если данные актуальны - берутся из кэша (🚀 мгновенно)
-   - Если данные устарели - загружаются заново
-
-3. **Автоматическая очистка:** устаревшие записи удаляются при проверке здоровья системы (`/health`)
-
-## 🗺️ Коды регионов HH.ru
-
-- `1` - Москва
-- `2` - Санкт-Петербург
-- `113` - Россия (все регионы)
-- `5` - Новосибирск
-- `4` - Екатеринбург
-
-Полный список: https://api.hh.ru/areas
-
-## 📊 Производительность
-
-- Параллельная загрузка страниц вакансий
-- Кэширование описаний вакансий
-- Rate limiting для соблюдения ограничений API
-- Оптимизированный поиск (сначала название, потом сниппет, потом полное описание)
-
-## 🔒 Ограничения
-
-- HH.ru API имеет лимит запросов (соблюдается через rate limiting)
-- Максимум 2000 вакансий на один поисковый запрос (20 страниц по 100 вакансий)
-- Для MVP рекомендуется использовать `max_pages: 10`
-
-## 🐛 Известные проблемы
-
-- При большом количестве вакансий анализ может занять несколько минут
-- CORS может потребовать настройки при использовании с другого домена
-
-## 📝 Структура проекта
-
-```
-techstats/
-├── main.py              # FastAPI приложение
-├── requirements.txt     # Зависимости Python
-├── index.html          # Веб-интерфейс
-└── README.md           # Документация
-```
-
-## 🤝 Вклад в проект
-
-Приветствуются pull requests! Для крупных изменений сначала откройте issue для обсуждения.
-
-## 📄 Лицензия
-
-MIT License - свободно используйте в своих проектах.
-
-## 👨‍💻 Автор
-
-Разработано на основе скрипта анализа вакансий HH.ru
-
-## 📞 Поддержка
-
-При возникновении проблем создайте issue в репозитории проекта.
-
----
-
-**Приятной работы с TechStats! 🚀**

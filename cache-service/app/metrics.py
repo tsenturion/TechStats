@@ -1,4 +1,3 @@
-from app.routers.metrics import router as metrics_router
 
 
 def setup_metrics(cache_manager) -> None:

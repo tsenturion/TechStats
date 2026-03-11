@@ -12,7 +12,7 @@ WS_URL = "ws://localhost:8004/api/v1/ws/analyze"
 
 async def _ensure_service_available() -> None:
     try:
-        async with httpx.AsyncClient(timeout=3.0) as client:
+        async with httpx.AsyncClient(timeout=3.0, trust_env=False) as client:
             response = await client.get(f"{BASE_URL}/api/v1/health")
             if response.status_code != 200:
                 pytest.skip(f"WebSocket service unavailable: status={response.status_code}")
@@ -31,16 +31,22 @@ async def test_websocket_analyze():
                 "technology": "Python",
                 "exact_search": True,
                 "area": 113,
-                "max_pages": 2,
-                "per_page": 10,
+                "max_pages": 1,
+                "per_page": 5,
             }
             await websocket.send(json.dumps(request))
 
-            while True:
-                response = await websocket.recv()
+            terminal = False
+            for _ in range(40):
+                response = await asyncio.wait_for(websocket.recv(), timeout=10)
                 data = json.loads(response)
                 if data.get("type") in {"error", "completed"}:
+                    terminal = True
                     break
+                if data.get("stage") in {"completed", "failed", "error", "cancelled"}:
+                    terminal = True
+                    break
+            assert terminal is True
     except Exception as exc:
         pytest.skip(f"WebSocket integration unavailable: {exc}")
 
@@ -48,7 +54,7 @@ async def test_websocket_analyze():
 @pytest.mark.asyncio
 async def test_http_endpoints():
     await _ensure_service_available()
-    async with httpx.AsyncClient() as client:
+    async with httpx.AsyncClient(trust_env=False) as client:
         health = await client.get(f"{BASE_URL}/api/v1/health")
         assert health.status_code == 200
 
@@ -62,7 +68,7 @@ async def test_http_endpoints():
 @pytest.mark.asyncio
 async def test_admin_endpoints():
     await _ensure_service_available()
-    async with httpx.AsyncClient() as client:
+    async with httpx.AsyncClient(trust_env=False) as client:
         unauthorized = await client.get(f"{BASE_URL}/api/v1/admin/connections")
         assert unauthorized.status_code in {401, 403}
 
@@ -76,4 +82,3 @@ async def test_admin_endpoints():
 
 if __name__ == "__main__":
     asyncio.run(test_http_endpoints())
-

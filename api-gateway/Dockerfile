@@ -3,10 +3,8 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-# Установка системных зависимостей
-RUN apt-get update && apt-get install -y \
-    curl \
-    && rm -rf /var/lib/apt/lists/*
+# Системные пакеты не устанавливаем: используем только Python-зависимости,
+# чтобы сборка не зависела от внешних apt-репозиториев.
 
 # Установка зависимостей
 COPY requirements.txt .

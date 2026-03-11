@@ -3,6 +3,8 @@ import asyncio
 import time
 from typing import Optional, Dict, Any
 import structlog
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from apscheduler.triggers.interval import IntervalTrigger
 
 from config import settings, CacheBackend
 from app.cache_manager import CacheManager
@@ -17,6 +19,7 @@ class CleanupScheduler:
         self.cache_manager = cache_manager
         self.task: Optional[asyncio.Task] = None
         self.running = False
+        self.scheduler = AsyncIOScheduler(timezone="UTC")
         self.stats: Dict[str, Any] = {
             "cleanups_performed": 0,
             "total_keys_cleared": 0,
@@ -29,38 +32,32 @@ class CleanupScheduler:
         if self.running:
             logger.warning("Cleanup scheduler already running")
             return
-        
+
         self.running = True
-        self.task = asyncio.create_task(self._cleanup_loop())
+        self.scheduler = AsyncIOScheduler(timezone="UTC")
+        self.scheduler.add_job(
+            self._perform_cleanup,
+            trigger=IntervalTrigger(seconds=max(1, int(settings.cleanup_interval_seconds))),
+            id="cache_cleanup_job",
+            replace_existing=True,
+            coalesce=True,
+            max_instances=1,
+        )
+        self.scheduler.start()
         logger.info("Cleanup scheduler started", interval=settings.cleanup_interval_seconds)
     
     async def stop(self):
         """Остановка планировщика"""
         if not self.running:
             return
-        
+
         self.running = False
-        if self.task:
-            self.task.cancel()
-            try:
-                await self.task
-            except asyncio.CancelledError:
-                pass
-        
+
+        if self.scheduler.running:
+            self.scheduler.shutdown(wait=False)
+        self.scheduler = AsyncIOScheduler(timezone="UTC")
+
         logger.info("Cleanup scheduler stopped")
-    
-    async def _cleanup_loop(self):
-        """Цикл очистки"""
-        while self.running:
-            try:
-                await asyncio.sleep(settings.cleanup_interval_seconds)
-                await self._perform_cleanup()
-            except asyncio.CancelledError:
-                break
-            except Exception as e:
-                self.stats["errors"] += 1
-                logger.error("Cleanup loop error", error=str(e))
-                await asyncio.sleep(60)  # Ждем перед повторной попыткой
     
     async def _perform_cleanup(self):
         """Выполнение очистки"""

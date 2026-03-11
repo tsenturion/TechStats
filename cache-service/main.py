@@ -6,18 +6,23 @@ import sys
 
 import uvicorn
 from fastapi import FastAPI
+from fastapi_health import health as healthcheck_route
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
+from slowapi.util import get_remote_address
 import structlog
 
 from config import settings
 from app.middleware import RequestLoggingMiddleware, ResponseTimeMiddleware, RateLimitMiddleware
-from app.routers import cache, health, metrics, admin, cluster
+from app.routers import cache, health as health_router, metrics, admin, cluster
 from app.cache_manager import CacheManager
 from app.cleanup_scheduler import CleanupScheduler
 from app.cluster_manager import ClusterManager
 from app.metrics import setup_metrics
+from shared.observability import setup_correlation_middleware, setup_prometheus_instrumentation
 
 # Настройка логирования
 logger = structlog.get_logger()
@@ -27,7 +32,7 @@ logger = structlog.get_logger()
 async def lifespan(app: FastAPI):
     """Управление жизненным циклом приложения"""
     # Обработка сигналов
-    def signal_handler(signum, frame):
+    def signal_handler(signum, _frame):
         logger.info(f"Received signal {signum}, shutting down...")
         sys.exit(0)
     
@@ -117,6 +122,9 @@ app = FastAPI(
     lifespan=lifespan
 )
 
+setup_correlation_middleware(app)
+setup_prometheus_instrumentation(app, expose=False)
+
 # Настройка middleware
 app.add_middleware(
     CORSMiddleware,
@@ -134,12 +142,31 @@ app.add_middleware(
     allowed_hosts=["*"] if settings.debug else ["techstats.com", "*.techstats.com"]
 )
 
+limiter = Limiter(
+    key_func=get_remote_address,
+    storage_uri=settings.redis_url,
+    default_limits=[f"{settings.api_rate_limit_per_minute}/minute"],
+)
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
 # Подключение роутеров
 app.include_router(cache.router, prefix="/api/v1", tags=["cache"])
 app.include_router(admin.router, prefix="/api/v1/admin", tags=["admin"])
 app.include_router(cluster.router, prefix="/api/v1/cluster", tags=["cluster"])
-app.include_router(health.router, prefix="/api/v1", tags=["health"])
+app.include_router(health_router.router, prefix="/api/v1", tags=["health"])
 app.include_router(metrics.router, prefix="/api/v1", tags=["metrics"])
+
+
+async def _cache_manager_ready() -> bool:
+    return hasattr(app.state, "cache_manager") and bool(app.state.cache_manager)
+
+
+app.add_api_route(
+    "/api/v1/health/ready",
+    healthcheck_route([_cache_manager_ready]),
+    tags=["health"],
+)
 
 
 @app.get("/")

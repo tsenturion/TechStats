@@ -2,8 +2,10 @@
 import time
 from contextlib import asynccontextmanager
 
-import httpx
 from fastapi import FastAPI, Request
+from fastapi_health import health
+from fastapi_cache import FastAPICache
+from fastapi_cache.backends.redis import RedisBackend
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
@@ -26,11 +28,16 @@ from app.routers import (
     analyzer_router,
     cache_router,
     websocket_router,
-    health_router
+    health_router,
+    auth_router,
+    runtime_settings_router,
 )
 from app.rate_limiting import rate_limiter
 from app.cache import cache_manager
 from app.metrics import setup_metrics, metrics_router
+from app.auth_backend import ensure_bootstrap_users
+from shared.http_client import build_async_client
+from shared.observability import setup_correlation_middleware, setup_prometheus_instrumentation
 
 # Настройка логирования
 logger = structlog.get_logger()
@@ -49,12 +56,16 @@ async def lifespan(app: FastAPI):
     # Инициализация Redis
     await cache_manager.init_redis()
     logger.info("Redis connected")
-    
+
+    if cache_manager.redis_client:
+        FastAPICache.init(RedisBackend(cache_manager.redis_client), prefix="gateway-cache")
+
     # Инициализация rate limiter
     await rate_limiter.init_redis()
     logger.info("Rate limiter initialized")
 
     setup_metrics()
+    await ensure_bootstrap_users()
     
     # Проверка доступности сервисов
     await check_services_health()
@@ -76,6 +87,9 @@ app = FastAPI(
     lifespan=lifespan
 )
 
+setup_correlation_middleware(app)
+setup_prometheus_instrumentation(app, expose=False)
+
 # Настройка middleware
 app.add_middleware(
     CORSMiddleware,
@@ -95,17 +109,34 @@ app.add_middleware(
 )
 
 # Настройка rate limiting
-limiter = Limiter(key_func=get_remote_address)
+limiter = Limiter(
+    key_func=get_remote_address,
+    storage_uri=settings.redis_url,
+    default_limits=[f"{settings.rate_limit_per_minute}/minute", f"{settings.rate_limit_per_hour}/hour"],
+)
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 # Подключение роутеров
 app.include_router(health_router, prefix="/api/v1", tags=["health"])
+app.include_router(auth_router, prefix="/api/v1", tags=["auth"])
 app.include_router(vacancy_router, prefix="/api/v1", tags=["vacancy"])
 app.include_router(analyzer_router, prefix="/api/v1", tags=["analyzer"])
 app.include_router(cache_router, prefix="/api/v1", tags=["cache"])
 app.include_router(websocket_router, prefix="/api/v1", tags=["websocket"])
+app.include_router(runtime_settings_router, prefix="/api/v1", tags=["runtime-settings"])
 app.include_router(metrics_router, prefix="/api/v1", tags=["metrics"])
+
+
+async def _redis_ready() -> bool:
+    return bool(cache_manager.redis_client)
+
+
+app.add_api_route(
+    "/api/v1/health/ready",
+    health([_redis_ready]),
+    tags=["health"],
+)
 
 
 @app.middleware("http")
@@ -143,7 +174,13 @@ async def check_services_health():
         "websocket": settings.websocket_service_url,
     }
     
-    async with httpx.AsyncClient(timeout=5.0) as client:
+    client = build_async_client(
+        base_url="http://localhost",
+        timeout=5.0,
+        retries=3,
+        backoff_factor=0.3,
+    )
+    async with client:
         for name, url in services.items():
             try:
                 response = await client.get(f"{url}/health")

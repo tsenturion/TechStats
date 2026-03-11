@@ -1,7 +1,6 @@
 # C:\Users\user\Desktop\TechStats\cache-service\app\routers\cluster.py
-import asyncio
 import time
-from typing import Dict, List, Any
+from typing import Dict, Any
 from fastapi import APIRouter, HTTPException, Body, Query, Depends, Request
 import structlog
 

@@ -1,5 +1,5 @@
 # C:\Users\user\Desktop\TechStats\analyzer-service\app\routers\patterns.py
-from typing import List, Dict, Any, Optional
+from typing import Dict, Any, Optional
 from fastapi import APIRouter, HTTPException, Body, Query, Depends, Request
 import structlog
 
@@ -38,29 +38,6 @@ async def get_all_patterns(
     except Exception as e:
         logger.error("Failed to get patterns", error=str(e))
         raise HTTPException(status_code=500, detail=f"Failed to get patterns: {str(e)}")
-
-
-@router.get("/patterns/{technology}")
-async def get_pattern(
-    technology: str,
-    patterns_loader: TechPatternsLoader = Depends(get_patterns_loader)
-):
-    """Получение паттерна по названию технологии"""
-    try:
-        pattern = patterns_loader.get_pattern(technology)
-        if not pattern:
-            raise HTTPException(status_code=404, detail="Pattern not found")
-        
-        return {
-            "technology": technology,
-            "pattern": pattern,
-            "compiled": patterns_loader.get_compiled_pattern(technology) is not None
-        }
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error("Failed to get pattern", technology=technology, error=str(e))
-        raise HTTPException(status_code=500, detail=f"Failed to get pattern: {str(e)}")
 
 
 @router.post("/patterns")
@@ -350,3 +327,26 @@ async def get_patterns_stats(
     except Exception as e:
         logger.error("Failed to get patterns stats", error=str(e))
         raise HTTPException(status_code=500, detail=f"Failed to get patterns stats: {str(e)}")
+
+
+@router.get("/patterns/{technology}")
+async def get_pattern(
+    technology: str,
+    patterns_loader: TechPatternsLoader = Depends(get_patterns_loader)
+):
+    """Получение паттерна по названию технологии"""
+    try:
+        pattern = patterns_loader.get_pattern(technology)
+        if not pattern:
+            raise HTTPException(status_code=404, detail="Pattern not found")
+
+        return {
+            "technology": technology,
+            "pattern": pattern,
+            "compiled": patterns_loader.get_compiled_pattern(technology) is not None
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("Failed to get pattern", technology=technology, error=str(e))
+        raise HTTPException(status_code=500, detail=f"Failed to get pattern: {str(e)}")

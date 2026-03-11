@@ -12,6 +12,8 @@ logger = structlog.get_logger()
 
 class CacheManager:
     """Менеджер кэширования для результатов анализа"""
+
+    ANALYSIS_CACHE_SCHEMA_VERSION = "v4"
     
     def __init__(self):
         self.redis_client: Optional[redis.Redis] = None
@@ -35,7 +37,7 @@ class CacheManager:
         sorted_ids = sorted(vacancy_ids)
         ids_hash = hashlib.md5(','.join(sorted_ids).encode()).hexdigest()[:16]
         
-        return f"analysis:{ids_hash}:{technology}:{exact_search}"
+        return f"analysis:{self.ANALYSIS_CACHE_SCHEMA_VERSION}:{ids_hash}:{technology}:{exact_search}"
     
     def _generate_vacancy_analysis_key(
         self,
@@ -44,7 +46,7 @@ class CacheManager:
         exact_search: bool
     ) -> str:
         """Генерация ключа для анализа конкретной вакансии"""
-        return f"vacancy_analysis:{vacancy_id}:{technology}:{exact_search}"
+        return f"vacancy_analysis:{self.ANALYSIS_CACHE_SCHEMA_VERSION}:{vacancy_id}:{technology}:{exact_search}"
 
     async def get(self, key: str) -> Optional[Dict[str, Any]]:
         """Универсальное чтение JSON-значения из Redis."""

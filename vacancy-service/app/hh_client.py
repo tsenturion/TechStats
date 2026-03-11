@@ -1,8 +1,7 @@
 # C:\Users\user\Desktop\TechStats\vacancy-service\app\hh_client.py
 import asyncio
 import time
-from typing import Dict, Any, List, Optional, Tuple
-from datetime import datetime, timedelta
+from typing import Dict, Any, List, Optional
 import httpx
 import structlog
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
@@ -10,6 +9,7 @@ import backoff
 
 from config import settings
 from app.rate_limiter import RateLimiter
+from shared.http_client import build_async_client
 
 logger = structlog.get_logger()
 
@@ -25,14 +25,16 @@ class HHClient:
         
     async def initialize(self):
         """Инициализация клиента"""
-        self.client = httpx.AsyncClient(
+        self.client = build_async_client(
+            base_url=settings.hh_api_base_url,
             timeout=settings.hh_api_timeout,
             headers={
                 "User-Agent": settings.hh_api_user_agent,
                 "Accept": "application/json",
                 "Accept-Charset": "utf-8"
             },
-            follow_redirects=True
+            retries=settings.max_retries,
+            backoff_factor=0.4,
         )
         
     async def close(self):
@@ -76,8 +78,9 @@ class HHClient:
         """Выполнение запроса к HH API"""
         await self._rate_limit()
         
-        url = f"{settings.hh_api_base_url}{endpoint}"
-        
+        url = endpoint if endpoint.startswith("/") else f"/{endpoint}"
+        full_url = f"{settings.hh_api_base_url}{url}"
+
         try:
             response = await self.client.request(
                 method=method,
@@ -90,7 +93,7 @@ class HHClient:
             logger.debug(
                 "HH API request",
                 method=method,
-                url=url,
+                url=full_url,
                 status_code=response.status_code,
                 params=params
             )
@@ -99,12 +102,12 @@ class HHClient:
             return response
             
         except httpx.TimeoutException:
-            logger.error("HH API timeout", url=url, params=params)
+            logger.error("HH API timeout", url=full_url, params=params)
             raise
         except httpx.HTTPStatusError as e:
             logger.error(
                 "HH API error",
-                url=url,
+                url=full_url,
                 status_code=e.response.status_code,
                 error=str(e)
             )
@@ -116,11 +119,11 @@ class HHClient:
             elif e.response.status_code == 403:
                 logger.warning("HH API access forbidden")
             elif e.response.status_code == 404:
-                logger.info("HH API resource not found", url=url)
+                logger.info("HH API resource not found", url=full_url)
                 
             raise
         except Exception as e:
-            logger.error("HH API unexpected error", url=url, error=str(e))
+            logger.error("HH API unexpected error", url=full_url, error=str(e))
             raise
     
     async def search_vacancies(
@@ -129,13 +132,12 @@ class HHClient:
         area: int = 113,
         page: int = 0,
         per_page: int = 100,
-        search_field: str = "name",
+        search_field: Optional[str] = "name",
         only_with_salary: bool = False
     ) -> Dict[str, Any]:
         """Поиск вакансий"""
         params = {
             "text": query,
-            "search_field": search_field,
             "area": area,
             "page": page,
             "per_page": per_page,
@@ -143,6 +145,9 @@ class HHClient:
             "order_by": "relevance",
             "locale": "RU"
         }
+
+        if search_field:
+            params["search_field"] = search_field
         
         response = await self.make_request("GET", "/vacancies", params=params)
         return response.json()

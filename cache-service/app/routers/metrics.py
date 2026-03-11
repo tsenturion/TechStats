@@ -1,7 +1,5 @@
 # C:\Users\user\Desktop\TechStats\cache-service\app\routers\metrics.py
-import time
-from typing import Dict, Any
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Request
 from fastapi.responses import Response
 from prometheus_client import generate_latest, CONTENT_TYPE_LATEST, Counter, Histogram, Gauge
 from config import settings
@@ -64,7 +62,7 @@ async def get_metrics(request: Request):
                     memory_bytes = memory_mb * 1024 * 1024
                     CACHE_MEMORY.labels(node=settings.node_id).set(memory_bytes)
         
-        except Exception as e:
+        except Exception:
             pass
     
     metrics = generate_latest()

@@ -2,21 +2,26 @@
 import time
 from contextlib import asynccontextmanager
 
-import httpx
 from fastapi import FastAPI, Request
+from fastapi_health import health as healthcheck_route
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
+from slowapi.util import get_remote_address
 import structlog
 import uvicorn
 from prometheus_client import Counter, Histogram, Gauge
 
 from config import settings
 from app.middleware import RequestLoggingMiddleware, ResponseTimeMiddleware
-from app.routers import analyze, health, metrics, patterns, stats
+from app.routers import analyze, health as health_router, metrics, patterns, stats
 from app.cache import cache_manager
 from app.analyzer import TextAnalyzer, PatternMatcher
 from app.tech_patterns import TechPatternsLoader
+from shared.http_client import build_async_client
+from shared.observability import setup_correlation_middleware, setup_prometheus_instrumentation
 
 # Настройка логирования
 logger = structlog.get_logger()
@@ -79,7 +84,7 @@ async def lifespan(app: FastAPI):
     logger.info("Pattern matcher initialized")
     
     # Инициализация HTTP клиента для vacancy service
-    vacancy_client = httpx.AsyncClient(
+    vacancy_client = build_async_client(
         base_url=settings.vacancy_service_url,
         timeout=settings.request_timeout,
         headers={"User-Agent": f"TechStats Analyzer/{settings.version}"}
@@ -104,6 +109,9 @@ app = FastAPI(
     lifespan=lifespan
 )
 
+setup_correlation_middleware(app)
+setup_prometheus_instrumentation(app, expose=False)
+
 # Настройка middleware
 app.add_middleware(
     CORSMiddleware,
@@ -120,12 +128,31 @@ app.add_middleware(
     allowed_hosts=["*"] if settings.debug else ["techstats.com", "*.techstats.com"]
 )
 
+limiter = Limiter(
+    key_func=get_remote_address,
+    storage_uri=settings.redis_url,
+    default_limits=["600/minute"],
+)
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
 # Подключение роутеров
 app.include_router(analyze.router, prefix="/api/v1", tags=["analysis"])
 app.include_router(patterns.router, prefix="/api/v1", tags=["patterns"])
 app.include_router(stats.router, prefix="/api/v1", tags=["statistics"])
-app.include_router(health.router, prefix="/api/v1", tags=["health"])
+app.include_router(health_router.router, prefix="/api/v1", tags=["health"])
 app.include_router(metrics.router, prefix="/api/v1", tags=["metrics"])
+
+
+async def _redis_ready() -> bool:
+    return bool(cache_manager.redis_client)
+
+
+app.add_api_route(
+    "/api/v1/health/ready",
+    healthcheck_route([_redis_ready]),
+    tags=["health"],
+)
 
 
 @app.middleware("http")

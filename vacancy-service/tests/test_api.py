@@ -9,7 +9,7 @@ BASE_URL = "http://localhost:8001"
 
 async def _ensure_service_available() -> None:
     try:
-        async with httpx.AsyncClient(base_url=BASE_URL, timeout=3.0) as client:
+        async with httpx.AsyncClient(base_url=BASE_URL, timeout=3.0, trust_env=False) as client:
             response = await client.get("/api/v1/health")
             if response.status_code != 200:
                 pytest.skip(f"Vacancy service unavailable: status={response.status_code}")
@@ -20,7 +20,7 @@ async def _ensure_service_available() -> None:
 @pytest.mark.asyncio
 async def test_search_vacancies():
     await _ensure_service_available()
-    async with httpx.AsyncClient(base_url=BASE_URL) as client:
+    async with httpx.AsyncClient(base_url=BASE_URL, trust_env=False) as client:
         response = await client.get(
             "/api/v1/search",
             params={
@@ -42,7 +42,7 @@ async def test_search_vacancies():
 @pytest.mark.asyncio
 async def test_get_vacancy():
     await _ensure_service_available()
-    async with httpx.AsyncClient(base_url=BASE_URL) as client:
+    async with httpx.AsyncClient(base_url=BASE_URL, trust_env=False) as client:
         response = await client.get("/api/v1/vacancies/123456")
         if response.status_code == 404:
             assert response.json()["detail"] == "Vacancy not found"
@@ -56,7 +56,7 @@ async def test_get_vacancy():
 @pytest.mark.asyncio
 async def test_get_areas():
     await _ensure_service_available()
-    async with httpx.AsyncClient(base_url=BASE_URL) as client:
+    async with httpx.AsyncClient(base_url=BASE_URL, trust_env=False) as client:
         response = await client.get("/api/v1/areas")
         assert response.status_code == 200
         data = response.json()
@@ -67,7 +67,7 @@ async def test_get_areas():
 @pytest.mark.asyncio
 async def test_health_check():
     await _ensure_service_available()
-    async with httpx.AsyncClient(base_url=BASE_URL) as client:
+    async with httpx.AsyncClient(base_url=BASE_URL, trust_env=False) as client:
         response = await client.get("/api/v1/health")
         assert response.status_code == 200
         data = response.json()
@@ -79,7 +79,7 @@ async def test_health_check():
 @pytest.mark.asyncio
 async def test_rate_limit_stats():
     await _ensure_service_available()
-    async with httpx.AsyncClient(base_url=BASE_URL) as client:
+    async with httpx.AsyncClient(base_url=BASE_URL, trust_env=False) as client:
         response = await client.get("/api/v1/rate-limit/stats")
         assert response.status_code == 200
         data = response.json()
@@ -91,4 +91,3 @@ async def test_rate_limit_stats():
 if __name__ == "__main__":
     asyncio.run(test_search_vacancies())
     print("All tests passed!")
-

@@ -45,6 +45,7 @@ async def websocket_analyze(websocket: WebSocket):
     await connection_manager.connect(websocket)
     try:
         payload = await websocket.receive_json()
+        await connection_manager.update_activity(websocket, received=True)
         await analysis_proxy.start_analysis(websocket, payload)
     except WebSocketDisconnect:
         logger.info("WebSocket disconnected by client")
@@ -66,6 +67,7 @@ async def websocket_proxy(websocket: WebSocket):
     try:
         while True:
             data = await websocket.receive_json()
+            await connection_manager.update_activity(websocket, received=True)
             message_type = data.get("type")
             if message_type == "analyze":
                 await analysis_proxy.start_analysis(websocket, data)
@@ -89,6 +91,7 @@ async def websocket_notifications(websocket: WebSocket):
         while True:
             try:
                 data = await asyncio.wait_for(websocket.receive_json(), timeout=settings.connection_timeout)
+                await connection_manager.update_activity(websocket, received=True)
                 if data.get("type") == "unsubscribe":
                     await connection_manager.unsubscribe(websocket, "notifications")
                     await websocket.send_json({"type": "unsubscribed", "topic": "notifications", "timestamp": time.time()})
@@ -264,4 +267,3 @@ async def broadcast_message(
     except Exception as exc:
         logger.error("Failed to broadcast message", error=str(exc))
         raise HTTPException(status_code=500, detail=str(exc))
-

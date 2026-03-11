@@ -1,5 +1,5 @@
 # C:\Users\user\Desktop\TechStats\Makefile
-.PHONY: help build up down logs test clean
+.PHONY: help build up down logs test test-unit test-integration test-all clean
 
 help:
 	@echo "Доступные команды:"
@@ -14,6 +14,9 @@ help:
 	@echo "  make logs-cache-cluster - Показать логи кластера кэша"
 	@echo "  make logs-websocket  - Показать логи WebSocket Service"
 	@echo "  make test               - Запустить тесты"
+	@echo "  make test-unit          - Запустить unit/smoke тесты всех сервисов"
+	@echo "  make test-integration   - Запустить интеграционные тесты gateway"
+	@echo "  make test-all           - Запустить unit + integration"
 	@echo "  make clean              - Очистить все (контейнеры, volumes)"
 	@echo "  make restart            - Перезапустить все сервисы"
 	@echo "  make status             - Показать статус сервисов"
@@ -41,6 +44,18 @@ logs-all:
 
 test:
 	docker-compose run --rm vacancy-service python -m pytest tests/
+
+test-unit:
+	pytest -q shared/tests
+	pytest -q api-gateway/tests
+	pytest -q vacancy-service/tests
+	pytest -q analyzer-service/tests
+	pytest -q websocket-service/tests
+
+test-integration:
+	pytest -q tests/integration/test_gateway_rbac_runtime_integration.py
+
+test-all: test-unit test-integration
 
 clean:
 	docker-compose down -v

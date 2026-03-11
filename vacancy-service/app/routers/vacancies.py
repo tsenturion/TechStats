@@ -1,18 +1,35 @@
 # C:\Users\user\Desktop\TechStats\vacancy-service\app\routers\vacancies.py
 import asyncio
-from typing import List, Dict, Any, Optional
+from typing import Dict, Any
 import httpx
 from fastapi import APIRouter, HTTPException, Query, Body, Request, Depends
-from fastapi.responses import JSONResponse
 import structlog
 
-from config import settings
 from app.cache import cache_manager
 from app.hh_client import HHClient
 from app.rate_limiter import RateLimiter
 
 router = APIRouter()
 logger = structlog.get_logger()
+
+
+def _normalize_for_contains(value: Any) -> str:
+    return " ".join(str(value or "").strip().lower().split())
+
+
+def _filter_items_by_title_contains(items: Any, query: str) -> list:
+    if not isinstance(items, list):
+        return []
+
+    normalized_query = _normalize_for_contains(query)
+    if not normalized_query:
+        return items
+
+    return [
+        item
+        for item in items
+        if normalized_query in _normalize_for_contains(item.get("name", "") if isinstance(item, dict) else "")
+    ]
 
 
 async def get_hh_client(request: Request) -> HHClient:
@@ -53,10 +70,13 @@ async def search_vacancies(
         page = 19
     
     # Формирование поискового запроса
+    non_exact_name_contains_mode = not exact_search and search_field == "name"
     if exact_search and search_field == "name":
         search_query = f'"{query}"'
     else:
         search_query = query
+    effective_search_field = None if non_exact_name_contains_mode else search_field
+    cache_search_field = "default_title_contains" if non_exact_name_contains_mode else search_field
     
     # Проверка кэша
     if use_cache:
@@ -65,7 +85,7 @@ async def search_vacancies(
             area=area,
             page=page,
             per_page=per_page,
-            search_field=search_field
+            search_field=cache_search_field
         )
         
         if cached_results:
@@ -99,8 +119,19 @@ async def search_vacancies(
             area=area,
             page=page,
             per_page=per_page,
-            search_field=search_field
+            search_field=effective_search_field
         )
+
+        if non_exact_name_contains_mode:
+            original_items = search_results.get("items", [])
+            filtered_items = _filter_items_by_title_contains(original_items, query)
+            search_results = {
+                **search_results,
+                "items": filtered_items,
+                "filtered_by_title_contains": True,
+                "title_contains_query": query,
+                "unfiltered_items_count": len(original_items) if isinstance(original_items, list) else 0,
+            }
         
         # Увеличение счетчика дневных запросов
         await rate_limiter.increment_daily_counter()
@@ -112,7 +143,7 @@ async def search_vacancies(
                 area=area,
                 page=page,
                 per_page=per_page,
-                search_field=search_field,
+                search_field=cache_search_field,
                 results=search_results
             )
         
@@ -128,6 +159,8 @@ async def search_vacancies(
                 "page": page,
                 "per_page": per_page,
                 "search_field": search_field,
+                "effective_search_field": effective_search_field,
+                "title_contains_mode": non_exact_name_contains_mode,
                 "exact_search": exact_search
             },
             **search_results

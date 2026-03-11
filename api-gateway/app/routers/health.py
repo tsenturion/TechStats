@@ -2,6 +2,7 @@ import time
 
 import httpx
 from fastapi import APIRouter
+from fastapi_health import health as health_route
 
 from config import settings
 
@@ -9,7 +10,7 @@ router = APIRouter()
 
 
 @router.get("/health")
-async def health():
+async def gateway_health():
     return {
         "service": "api-gateway",
         "status": "healthy",
@@ -38,3 +39,9 @@ async def services_health():
                 results[name] = {"healthy": False, "error": str(exc)}
     return {"services": results}
 
+
+async def _gateway_ready() -> bool:
+    return True
+
+
+router.add_api_route("/health/live", health_route([_gateway_ready]), methods=["GET"])

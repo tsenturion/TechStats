@@ -1,7 +1,6 @@
 # C:\Users\user\Desktop\TechStats\analyzer-service\config.py
 from pydantic_settings import BaseSettings
-from typing import List, Optional, Dict, Any
-import os
+from typing import Optional, Dict, Any
 
 
 class Settings(BaseSettings):
@@ -24,6 +23,7 @@ class Settings(BaseSettings):
     analysis_cache_ttl_hours: int = 24
     pattern_cache_ttl_hours: int = 168  # 7 дней
     tech_patterns_file: str = "data/tech_patterns.json"
+    patterns_database_url: str = "sqlite:///data/tech_patterns.db"
     
     # NLP настройки
     enable_stemming: bool = True
@@ -39,6 +39,13 @@ class Settings(BaseSettings):
     # Retry settings
     max_retries: int = 3
     retry_delay: float = 1.0
+
+    # Celery
+    celery_enabled: bool = False
+    celery_broker_url: str = "redis://redis:6379/1"
+    celery_result_backend: str = "redis://redis:6379/2"
+    celery_task_default_queue: str = "techstats-analyzer"
+    analyzer_internal_url: str = "http://analyzer-service:8002"
     
     # Технологические паттерны
     tech_patterns: Optional[Dict[str, Any]] = None

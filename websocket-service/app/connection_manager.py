@@ -1,10 +1,12 @@
 import asyncio
+import json
 import time
 import uuid
 from collections import defaultdict, deque
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 import structlog
+from broadcaster import Broadcast
 from fastapi import HTTPException, WebSocket
 
 from config import settings
@@ -28,6 +30,52 @@ class ConnectionManager:
             "errors": 0,
         }
         self.lock = asyncio.Lock()
+        self.node_id = f"ws-node-{uuid.uuid4().hex[:8]}"
+        self.broadcast_backend: Broadcast | None = None
+        self.broadcast_task: asyncio.Task | None = None
+
+    async def initialize_pubsub(self) -> None:
+        if self.broadcast_backend is not None:
+            return
+        self.broadcast_backend = Broadcast(settings.redis_url)
+        await self.broadcast_backend.connect()
+        self.broadcast_task = asyncio.create_task(self._pubsub_listener())
+
+    async def shutdown_pubsub(self) -> None:
+        if self.broadcast_task:
+            self.broadcast_task.cancel()
+            try:
+                await self.broadcast_task
+            except asyncio.CancelledError:
+                pass
+            self.broadcast_task = None
+        if self.broadcast_backend:
+            await self.broadcast_backend.disconnect()
+            self.broadcast_backend = None
+
+    async def _pubsub_listener(self) -> None:
+        if self.broadcast_backend is None:
+            return
+        channel = settings.websocket_pubsub_channel
+        async with self.broadcast_backend.subscribe(channel=channel) as subscriber:
+            async for event in subscriber:
+                try:
+                    payload = json.loads(event.message)
+                except Exception:
+                    continue
+
+                if payload.get("origin") == self.node_id:
+                    continue
+
+                scope = str(payload.get("scope", "topic"))
+                message = payload.get("message", {})
+                if scope == "all":
+                    await self._broadcast_local(message)
+                    continue
+
+                topic = str(payload.get("topic", "")).strip()
+                if topic:
+                    await self._broadcast_to_topic_local(topic, message)
 
     def generate_connection_id(self) -> str:
         return f"conn_{uuid.uuid4().hex[:16]}"
@@ -145,7 +193,7 @@ class ConnectionManager:
             return False
         return await self.send_message(websocket, message)
 
-    async def broadcast(self, message: Dict[str, Any], exclude: Optional[List[str]] = None) -> List[Tuple[str, bool]]:
+    async def _broadcast_local(self, message: Dict[str, Any], exclude: Optional[List[str]] = None) -> List[Tuple[str, bool]]:
         exclude_ids = set(exclude or [])
         async with self.lock:
             targets = [(cid, ws) for cid, ws in self.active_connections.items() if cid not in exclude_ids]
@@ -154,13 +202,50 @@ class ConnectionManager:
             results.append((connection_id, await self.send_message(websocket, message)))
         return results
 
-    async def broadcast_to_topic(self, topic: str, message: Dict[str, Any]) -> List[Tuple[str, bool]]:
+    async def _broadcast_to_topic_local(self, topic: str, message: Dict[str, Any]) -> List[Tuple[str, bool]]:
         async with self.lock:
             subscribers = list(self.subscriptions.get(topic, set()))
         results = []
         for connection_id in subscribers:
             results.append((connection_id, await self.send_to_connection(connection_id, message)))
         return results
+
+    async def broadcast(self, message: Dict[str, Any], exclude: Optional[List[str]] = None) -> List[Tuple[str, bool]]:
+        local_results = await self._broadcast_local(message, exclude)
+        if self.broadcast_backend is not None:
+            try:
+                await self.broadcast_backend.publish(
+                    channel=settings.websocket_pubsub_channel,
+                    message=json.dumps(
+                        {
+                            "scope": "all",
+                            "origin": self.node_id,
+                            "message": message,
+                        }
+                    ),
+                )
+            except Exception as exc:
+                logger.warning("Failed to publish global websocket broadcast", error=str(exc))
+        return local_results
+
+    async def broadcast_to_topic(self, topic: str, message: Dict[str, Any]) -> List[Tuple[str, bool]]:
+        local_results = await self._broadcast_to_topic_local(topic, message)
+        if self.broadcast_backend is not None:
+            try:
+                await self.broadcast_backend.publish(
+                    channel=settings.websocket_pubsub_channel,
+                    message=json.dumps(
+                        {
+                            "scope": "topic",
+                            "topic": topic,
+                            "origin": self.node_id,
+                            "message": message,
+                        }
+                    ),
+                )
+            except Exception as exc:
+                logger.warning("Failed to publish topic websocket broadcast", topic=topic, error=str(exc))
+        return local_results
 
     async def subscribe(self, websocket: WebSocket, topic: str) -> bool:
         async with self.lock:
@@ -249,4 +334,3 @@ class ConnectionManager:
     def get_message_history(self, connection_id: str, limit: int = 10) -> List[Dict[str, Any]]:
         history = self.message_history.get(connection_id, deque())
         return list(history)[-limit:]
-

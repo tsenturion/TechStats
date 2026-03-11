@@ -2,12 +2,12 @@
 import asyncio
 import time
 import hashlib
-from typing import Dict, List, Optional, Any, Set
+from typing import Dict, List, Optional, Any
 from dataclasses import dataclass, asdict
 import aiohttp
 import structlog
 
-from config import settings
+from config import settings, CacheBackend
 
 logger = structlog.get_logger()
 
@@ -34,11 +34,41 @@ class ClusterManager:
         self.running = False
         self.consistent_hash_ring: Dict[int, str] = {}
         self.virtual_nodes = 100
+        self.external_cluster_mode = settings.cache_backend == CacheBackend.REDIS_CLUSTER
     
     async def initialize(self):
         """Инициализация кластера"""
         if not settings.enable_clustering:
             logger.info("Clustering disabled, running in single-node mode")
+            return
+
+        if self.external_cluster_mode:
+            # When Redis Cluster/Sentinel is used, topology/distribution is delegated to Redis.
+            self.self_node = ClusterNode(
+                id=settings.node_id,
+                url=f"http://{settings.node_id}:{settings.port}",
+                status="online",
+                last_seen=time.time(),
+                load=0.0,
+                version=settings.version,
+                metadata={
+                    "mode": "external_redis_cluster",
+                    "cache_backend": settings.cache_backend.value,
+                },
+            )
+            self.nodes[settings.node_id] = self.self_node
+            for node_url in settings.get_cluster_nodes():
+                node_id = self._extract_node_id(node_url)
+                self.nodes[node_id] = ClusterNode(
+                    id=node_id,
+                    url=node_url,
+                    status="online",
+                    last_seen=time.time(),
+                    load=0.0,
+                    version=settings.version,
+                    metadata={"managed_by": "redis_cluster"},
+                )
+            logger.info("External Redis cluster mode enabled", nodes=len(self.nodes))
             return
 
         # Создаем информацию о текущей ноде
@@ -102,6 +132,10 @@ class ClusterManager:
     
     def _build_hash_ring(self):
         """Построение consistent hash ring"""
+        if self.external_cluster_mode:
+            self.consistent_hash_ring = {}
+            return
+
         self.consistent_hash_ring.clear()
         
         for node_id, node in self.nodes.items():
@@ -125,6 +159,10 @@ class ClusterManager:
     
     def get_node_for_key(self, key: str) -> Optional[str]:
         """Получение ноды для ключа"""
+        if self.external_cluster_mode:
+            # Key routing is delegated to Redis Cluster hash slots.
+            return settings.node_id
+
         if not self.consistent_hash_ring:
             return None
         
@@ -140,6 +178,8 @@ class ClusterManager:
     
     async def _health_check_loop(self):
         """Цикл проверки здоровья нод"""
+        if self.external_cluster_mode:
+            return
         while self.running:
             try:
                 await asyncio.sleep(30)  # Проверяем каждые 30 секунд
@@ -244,6 +284,8 @@ class ClusterManager:
     
     async def route_request(self, key: str) -> Optional[str]:
         """Маршрутизация запроса на нужную ноду"""
+        if self.external_cluster_mode:
+            return None
         if not settings.enable_clustering:
             return None
         
@@ -257,6 +299,9 @@ class ClusterManager:
     
     async def replicate_data(self, key: str, value: Any, ttl: Optional[int] = None) -> bool:
         """Репликация данных на другие ноды"""
+        if self.external_cluster_mode:
+            # Replication is handled by Redis Cluster/Sentinel.
+            return True
         if not settings.enable_clustering:
             return True
         
@@ -320,9 +365,11 @@ class ClusterManager:
                 if ttl:
                     payload["ttl"] = ttl
                 
+                replication_secret = f"replicate-{node.id}-{int(time.time() / 3600)}"
                 async with session.post(
                     f"{node.url}/api/v1/cache/replicate",
-                    json=payload
+                    json=payload,
+                    headers={"X-Replication-Secret": replication_secret},
                 ) as response:
                     return response.status == 200
         

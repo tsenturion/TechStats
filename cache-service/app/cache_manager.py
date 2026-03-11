@@ -1,21 +1,20 @@
 # C:\Users\user\Desktop\TechStats\cache-service\app\cache_manager.py
-import asyncio
 import time
-import json
-import hashlib
 import pickle
-import zlib
-from typing import Dict, Any, List, Optional, Union, Tuple
+from typing import Dict, Any, List, Optional, Union
 from abc import ABC, abstractmethod
 from datetime import datetime, timedelta
+import fnmatch
+from urllib.parse import urlparse
 import redis.asyncio as redis
 from redis.asyncio.cluster import RedisCluster
 from pymongo import MongoClient
 from pymongo.database import Database
 import pymongo
 import msgpack
-import orjson
 import structlog
+from aiocache import Cache as AioCache
+from cachetools import FIFOCache, LFUCache, LRUCache
 
 from config import settings, CacheBackend, CacheStrategy
 
@@ -453,6 +452,174 @@ class RedisBackend(CacheBackendInterface):
             logger.info("Redis client closed")
 
 
+class AioCacheRedisBackend(CacheBackendInterface):
+    """Redis backend based on aiocache to reduce custom caching glue code."""
+
+    def __init__(self):
+        self.cache: Optional[AioCache] = None
+        self.initialized = False
+        self.namespace = "techstats-cache"
+
+    async def initialize(self):
+        parsed = urlparse(settings.redis_url)
+        endpoint = parsed.hostname or "redis"
+        port = int(parsed.port or 6379)
+        db = int((parsed.path or "/0").lstrip("/") or "0")
+        password = parsed.password
+
+        self.cache = AioCache(
+            AioCache.REDIS,
+            endpoint=endpoint,
+            port=port,
+            password=password,
+            db=db,
+            namespace=self.namespace,
+        )
+
+        await self.cache.set("__healthcheck__", "ok", ttl=5)
+        self.initialized = True
+        logger.info("aiocache redis backend initialized", endpoint=endpoint, port=port, db=db)
+
+    async def get(self, key: str) -> Optional[Any]:
+        if not self.initialized or not self.cache:
+            return None
+        try:
+            return await self.cache.get(key, default=None)
+        except Exception as exc:
+            logger.error("aiocache get error", key=key, error=str(exc))
+            return None
+
+    async def set(
+        self,
+        key: str,
+        value: Any,
+        ttl: Optional[int] = None,
+        tags: Optional[List[str]] = None,
+    ) -> bool:
+        if not self.initialized or not self.cache:
+            return False
+        try:
+            if ttl is None:
+                await self.cache.set(key, value)
+            else:
+                await self.cache.set(key, value, ttl=ttl)
+            return True
+        except Exception as exc:
+            logger.error("aiocache set error", key=key, error=str(exc))
+            return False
+
+    async def delete(self, key: str) -> bool:
+        if not self.initialized or not self.cache:
+            return False
+        try:
+            deleted = await self.cache.delete(key)
+            return bool(deleted)
+        except Exception as exc:
+            logger.error("aiocache delete error", key=key, error=str(exc))
+            return False
+
+    async def exists(self, key: str) -> bool:
+        if not self.initialized or not self.cache:
+            return False
+        try:
+            return bool(await self.cache.exists(key))
+        except Exception as exc:
+            logger.error("aiocache exists error", key=key, error=str(exc))
+            return False
+
+    async def mget(self, keys: List[str]) -> Dict[str, Optional[Any]]:
+        if not self.initialized or not self.cache:
+            return {key: None for key in keys}
+        try:
+            values = await self.cache.multi_get(keys)
+            return {key: value for key, value in zip(keys, values)}
+        except Exception as exc:
+            logger.error("aiocache mget error", error=str(exc))
+            return {key: None for key in keys}
+
+    async def mset(
+        self,
+        items: Dict[str, Any],
+        ttl: Optional[int] = None,
+        tags: Optional[Dict[str, List[str]]] = None,
+    ) -> bool:
+        if not self.initialized or not self.cache:
+            return False
+        try:
+            pairs = list(items.items())
+            if ttl is None:
+                await self.cache.multi_set(pairs)
+            else:
+                await self.cache.multi_set(pairs, ttl=ttl)
+            return True
+        except Exception as exc:
+            logger.error("aiocache mset error", error=str(exc))
+            return False
+
+    async def keys(self, pattern: str = "*") -> List[str]:
+        if not self.initialized or not self.cache:
+            return []
+        try:
+            raw_keys = await self.cache.raw("keys", f"{self.namespace}:{pattern}")
+            normalized = []
+            for item in raw_keys or []:
+                key = item.decode() if isinstance(item, (bytes, bytearray)) else str(item)
+                if key.startswith(f"{self.namespace}:"):
+                    key = key[len(self.namespace) + 1 :]
+                normalized.append(key)
+            return normalized
+        except Exception as exc:
+            logger.error("aiocache keys error", pattern=pattern, error=str(exc))
+            return []
+
+    async def clear(self, pattern: str = "*") -> int:
+        if not self.initialized or not self.cache:
+            return 0
+        try:
+            if pattern == "*":
+                await self.cache.clear()
+                return 0
+            keys = await self.keys(pattern)
+            deleted = 0
+            for key in keys:
+                if await self.delete(key):
+                    deleted += 1
+            return deleted
+        except Exception as exc:
+            logger.error("aiocache clear error", pattern=pattern, error=str(exc))
+            return 0
+
+    async def get_stats(self) -> Dict[str, Any]:
+        if not self.initialized or not self.cache:
+            return {"error": "aiocache redis backend not initialized"}
+        try:
+            info = await self.cache.raw("info")
+            if isinstance(info, bytes):
+                info = info.decode(errors="ignore")
+            key_count = 0
+            try:
+                keys = await self.keys("*")
+                key_count = len(keys)
+            except Exception:
+                key_count = 0
+            return {
+                "type": "aiocache_redis",
+                "namespace": self.namespace,
+                "keys": key_count,
+                "info": info,
+            }
+        except Exception as exc:
+            logger.error("aiocache stats error", error=str(exc))
+            return {"error": str(exc)}
+
+    async def shutdown(self):
+        if self.cache:
+            await self.cache.close()
+            self.cache = None
+            self.initialized = False
+            logger.info("aiocache redis backend closed")
+
+
 class MemoryBackend(CacheBackendInterface):
     """In-memory бэкенд для кэша (для тестирования)"""
     
@@ -461,11 +628,35 @@ class MemoryBackend(CacheBackendInterface):
         self.max_size = settings.max_cache_size_mb * 1024 * 1024  # в байтах
         self.current_size = 0
         self.initialized = False
+        self.eviction_index = self._build_eviction_index()
     
     async def initialize(self):
         """Инициализация in-memory кэша"""
         self.initialized = True
+        self.eviction_index = self._build_eviction_index()
         logger.info("Memory backend initialized", max_size_mb=settings.max_cache_size_mb)
+
+    def _build_eviction_index(self):
+        max_entries = max(128, settings.max_cache_size_mb * 1024)
+        if settings.cache_strategy == CacheStrategy.LFU:
+            return LFUCache(maxsize=max_entries)
+        if settings.cache_strategy == CacheStrategy.FIFO:
+            return FIFOCache(maxsize=max_entries)
+        return LRUCache(maxsize=max_entries)
+
+    def _touch_eviction_index(self, key: str) -> None:
+        try:
+            self.eviction_index[key] = time.time()
+            _ = self.eviction_index.get(key)
+        except Exception:
+            pass
+
+    def _pop_eviction_candidate(self) -> Optional[str]:
+        try:
+            key, _value = self.eviction_index.popitem()
+            return str(key)
+        except Exception:
+            return None
     
     def _get_item_size(self, item: CacheItem) -> int:
         """Получение размера элемента в байтах"""
@@ -478,39 +669,19 @@ class MemoryBackend(CacheBackendInterface):
         """Вытеснение элементов если превышен лимит"""
         if self.current_size <= self.max_size:
             return
-        
-        # Применяем стратегию вытеснения
-        if settings.cache_strategy == CacheStrategy.LRU:
-            # Least Recently Used
-            items = sorted(
-                self.cache.items(),
-                key=lambda x: x[1].accessed_at
-            )
-        elif settings.cache_strategy == CacheStrategy.LFU:
-            # Least Frequently Used
-            items = sorted(
-                self.cache.items(),
-                key=lambda x: x[1].access_count
-            )
-        elif settings.cache_strategy == CacheStrategy.FIFO:
-            # First In First Out
-            items = sorted(
-                self.cache.items(),
-                key=lambda x: x[1].created_at
-            )
-        else:
-            # Random
-            import random
-            items = list(self.cache.items())
-            random.shuffle(items)
-        
+
         # Удаляем пока не освободим достаточно места
         target_size = self.max_size * 0.8  # Цель - 80% от максимума
-        while self.current_size > target_size and items:
-            key, item = items.pop(0)
-            item_size = self._get_item_size(item)
-            del self.cache[key]
-            self.current_size -= item_size
+        while self.current_size > target_size and self.cache:
+            candidate = self._pop_eviction_candidate()
+            if not candidate or candidate not in self.cache:
+                # Fallback: deterministic eviction by oldest access timestamp.
+                candidate = min(self.cache.items(), key=lambda item: item[1].accessed_at)[0]
+
+            item = self.cache.pop(candidate, None)
+            if item is None:
+                continue
+            self.current_size -= self._get_item_size(item)
     
     async def get(self, key: str) -> Optional[Any]:
         """Получение значения из памяти"""
@@ -523,12 +694,14 @@ class MemoryBackend(CacheBackendInterface):
             # Проверка на expiration
             if item.is_expired():
                 del self.cache[key]
+                self.eviction_index.pop(key, None)
                 self.current_size -= self._get_item_size(item)
                 return None
             
             # Обновляем статистику доступа
             item.accessed_at = time.time()
             item.access_count += 1
+            self._touch_eviction_index(key)
             
             return item.value
         
@@ -559,10 +732,12 @@ class MemoryBackend(CacheBackendInterface):
                 old_item = self.cache[key]
                 old_size = self._get_item_size(old_item)
                 self.current_size -= old_size
+                self.eviction_index.pop(key, None)
             
             # Добавляем новый
             self.cache[key] = item
             self.current_size += item_size
+            self._touch_eviction_index(key)
             
             # Вытесняем если нужно
             await self._evict_if_needed()
@@ -582,6 +757,7 @@ class MemoryBackend(CacheBackendInterface):
             item = self.cache[key]
             item_size = self._get_item_size(item)
             del self.cache[key]
+            self.eviction_index.pop(key, None)
             self.current_size -= item_size
             return True
         
@@ -629,7 +805,6 @@ class MemoryBackend(CacheBackendInterface):
             return []
         
         # Простая реализация паттерна
-        import fnmatch
         current_keys = list(self.cache.keys())
         
         # Фильтрация просроченных
@@ -678,6 +853,7 @@ class MemoryBackend(CacheBackendInterface):
     async def shutdown(self):
         """Завершение работы in-memory кэша"""
         self.cache.clear()
+        self.eviction_index.clear()
         self.current_size = 0
         logger.info("Memory backend cleared")
 
@@ -1008,7 +1184,7 @@ class CacheManager:
         """Инициализация менеджера кэша"""
         # Выбор бэкенда
         if settings.cache_backend == CacheBackend.REDIS:
-            self.backend = RedisBackend()
+            self.backend = AioCacheRedisBackend()
         elif settings.cache_backend == CacheBackend.REDIS_CLUSTER:
             self.backend = RedisBackend()
         elif settings.cache_backend == CacheBackend.MEMORY:

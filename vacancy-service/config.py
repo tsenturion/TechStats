@@ -1,7 +1,5 @@
 # C:\Users\user\Desktop\TechStats\vacancy-service\config.py
 from pydantic_settings import BaseSettings
-from typing import List, Optional
-import os
 
 
 class Settings(BaseSettings):

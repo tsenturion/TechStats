@@ -1,10 +1,8 @@
 # C:\Users\user\Desktop\TechStats\cache-service\config.py
 import json
-from typing import List, Optional, Dict, Any, Union
+from typing import List, Optional
 from enum import Enum
-import os
 from pydantic_settings import BaseSettings
-from pydantic import field_validator, Field
 
 class CacheBackend(str, Enum):
     REDIS = "redis"

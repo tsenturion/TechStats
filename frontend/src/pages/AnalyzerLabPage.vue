@@ -1,11 +1,17 @@
 <script setup>
-import { onBeforeUnmount, reactive, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 
 import JsonBlock from '../components/JsonBlock.vue'
 import SectionHeader from '../components/SectionHeader.vue'
 import { useApi } from '../composables/useApi'
+import { useAuth } from '../composables/useAuth'
+import { useRuntimeSettings } from '../composables/useRuntimeSettings'
+import { useUiPrefs } from '../composables/useUiPrefs'
 
 const { apiRequest } = useApi()
+const { isUserOrAdmin, isAdmin } = useAuth()
+const { loadRuntimeSettings, getSettingValue } = useRuntimeSettings()
+const { language } = useUiPrefs()
 
 const errors = ref([])
 
@@ -35,7 +41,7 @@ const batchForm = reactive({
 const batchResult = ref(null)
 
 const textForm = reactive({
-  text: 'Нужен Python разработчик со знанием FastAPI, Docker и PostgreSQL.',
+  text: 'Need a Python developer with FastAPI, Docker, and PostgreSQL.',
   technology: 'Python',
   technologies: 'Python,Docker,PostgreSQL',
   mode: 'single',
@@ -80,10 +86,169 @@ const analyzerStats = reactive({
   performance: null,
   cache: null,
 })
+const runLocked = computed(() => !isUserOrAdmin.value)
+const patternManageLocked = computed(() => !isAdmin.value)
+
+const messages = {
+  ru: {
+    subtitle: 'Полный цикл analyzer-service: sync/async/batch/text + patterns CRUD + stats.',
+    userRequired: 'Требуется вход с ролью user/admin',
+    adminRequired: 'Требуется роль admin',
+    guestHint:
+      'В гостевом режиме доступны статистика и просмотр patterns. Запуск анализа доступен только user/admin.',
+    adminHint: 'Управление patterns (create/update/delete) доступно только admin.',
+    analyzeSection: 'Анализ (Sync + Async)',
+    vacancyTitle: 'Vacancy title',
+    technology: 'Technology',
+    area: 'Area',
+    maxPages: 'Max pages',
+    perPage: 'Per page',
+    exactSearch: 'Exact search',
+    useCache: 'Use cache',
+    runSync: 'Run Sync',
+    runAsync: 'Run Async',
+    fetchAsyncResult: 'Fetch Async Result',
+    syncResult: 'Sync Result',
+    asyncTask: 'Async Task',
+    batchTextSection: 'Batch + Text Analysis',
+    vacancyIds: 'Vacancy ID',
+    technologies: 'Technologies',
+    runBatchAnalysis: 'Run Batch Analysis',
+    text: 'Text',
+    mode: 'Mode',
+    singleTechnology: 'Single Technology',
+    multipleTechnologies: 'Multiple Technologies',
+    technologiesCsv: 'Technologies CSV',
+    runTextAnalysis: 'Run Text Analysis',
+    batchResult: 'Batch Result',
+    textAnalysis: 'Text Analysis',
+    patternsCrud: 'Patterns CRUD',
+    id: 'ID',
+    name: 'Name',
+    category: 'Category',
+    regexPatterns: 'Regex patterns (comma/newline)',
+    aliases: 'Aliases',
+    weight: 'Weight',
+    description: 'Description',
+    create: 'Create',
+    searchByName: 'Search by Name',
+    loadPatterns: 'Load Patterns',
+    loadCategoriesStats: 'Load Categories/Stats',
+    patternIdGetUpdate: 'Pattern ID for get/update',
+    get: 'Get',
+    update: 'Update',
+    patternIdDelete: 'Pattern ID for delete',
+    delete: 'Delete',
+    patternsList: 'Patterns list',
+    patternDetails: 'Pattern details',
+    patternSearch: 'Pattern search',
+    patternCategories: 'Pattern categories',
+    patternStats: 'Pattern stats',
+    analyzerStats: 'Analyzer Stats',
+    summaryHours: 'Summary hours',
+    techDays: 'Tech days',
+    comparisonDays: 'Comparison days',
+    comparisonTechCsv: 'Comparison technologies CSV',
+    performanceHours: 'Performance hours',
+    summary: 'Summary',
+    comparison: 'Comparison',
+    performanceCache: 'Performance + Cache',
+    technologyStats: 'Technology stats',
+    performance: 'Performance',
+    cacheStats: 'Cache stats',
+    errors: 'Ошибки',
+    unknownError: 'неизвестная ошибка',
+  },
+  en: {
+    subtitle: 'Full analyzer-service cycle: sync/async/batch/text + patterns CRUD + stats.',
+    userRequired: 'Login with user/admin role is required',
+    adminRequired: 'Admin role is required',
+    guestHint:
+      'In guest mode stats and patterns view are available. Starting analysis requires user/admin role.',
+    adminHint: 'Patterns management (create/update/delete) is available only for admin role.',
+    analyzeSection: 'Analyze (Sync + Async)',
+    vacancyTitle: 'Vacancy title',
+    technology: 'Technology',
+    area: 'Area',
+    maxPages: 'Max pages',
+    perPage: 'Per page',
+    exactSearch: 'Exact search',
+    useCache: 'Use cache',
+    runSync: 'Run Sync',
+    runAsync: 'Run Async',
+    fetchAsyncResult: 'Fetch Async Result',
+    syncResult: 'Sync Result',
+    asyncTask: 'Async Task',
+    batchTextSection: 'Batch + Text Analysis',
+    vacancyIds: 'Vacancy IDs',
+    technologies: 'Technologies',
+    runBatchAnalysis: 'Run Batch Analysis',
+    text: 'Text',
+    mode: 'Mode',
+    singleTechnology: 'Single Technology',
+    multipleTechnologies: 'Multiple Technologies',
+    technologiesCsv: 'Technologies CSV',
+    runTextAnalysis: 'Run Text Analysis',
+    batchResult: 'Batch Result',
+    textAnalysis: 'Text Analysis',
+    patternsCrud: 'Patterns CRUD',
+    id: 'ID',
+    name: 'Name',
+    category: 'Category',
+    regexPatterns: 'Regex patterns (comma/newline)',
+    aliases: 'Aliases',
+    weight: 'Weight',
+    description: 'Description',
+    create: 'Create',
+    searchByName: 'Search by Name',
+    loadPatterns: 'Load Patterns',
+    loadCategoriesStats: 'Load Categories/Stats',
+    patternIdGetUpdate: 'Pattern ID for get/update',
+    get: 'Get',
+    update: 'Update',
+    patternIdDelete: 'Pattern ID for delete',
+    delete: 'Delete',
+    patternsList: 'Patterns list',
+    patternDetails: 'Pattern details',
+    patternSearch: 'Pattern search',
+    patternCategories: 'Pattern categories',
+    patternStats: 'Pattern stats',
+    analyzerStats: 'Analyzer Stats',
+    summaryHours: 'Summary hours',
+    techDays: 'Tech days',
+    comparisonDays: 'Comparison days',
+    comparisonTechCsv: 'Comparison technologies CSV',
+    performanceHours: 'Performance hours',
+    summary: 'Summary',
+    comparison: 'Comparison',
+    performanceCache: 'Performance + Cache',
+    technologyStats: 'Technology stats',
+    performance: 'Performance',
+    cacheStats: 'Cache stats',
+    errors: 'Errors',
+    unknownError: 'unknown error',
+  },
+}
+
+function t(key) {
+  return messages[language.value]?.[key] || messages.en[key] || key
+}
 
 function addError(scope, error) {
-  const detail = error?.data?.detail || error?.message || 'unknown error'
+  const detail = error?.data?.detail || error?.message || t('unknownError')
   errors.value.unshift(`[${scope}] ${detail}`)
+}
+
+function requireUserPermission(scope) {
+  if (!runLocked.value) return true
+  addError(scope, { message: t('userRequired') })
+  return false
+}
+
+function requireAdminPermission(scope) {
+  if (!patternManageLocked.value) return true
+  addError(scope, { message: t('adminRequired') })
+  return false
 }
 
 function parseCsv(value) {
@@ -94,6 +259,7 @@ function parseCsv(value) {
 }
 
 async function runSyncAnalyze() {
+  if (!requireUserPermission('analyze sync')) return
   try {
     const response = await apiRequest('analyzer', '/api/v1/analyze', {
       method: 'POST',
@@ -116,6 +282,7 @@ async function runSyncAnalyze() {
 }
 
 async function startAsyncAnalyze() {
+  if (!requireUserPermission('analyze async')) return
   stopAsyncPolling()
   asyncTask.id = ''
   asyncTask.status = null
@@ -174,6 +341,7 @@ async function pollAsyncStatus() {
 }
 
 async function loadAsyncResult() {
+  if (!requireUserPermission('async result')) return
   if (!asyncTask.id) return
   try {
     const result = await apiRequest('analyzer', `/api/v1/analyze/async/${asyncTask.id}/result`)
@@ -184,6 +352,7 @@ async function loadAsyncResult() {
 }
 
 async function runBatchAnalyze() {
+  if (!requireUserPermission('analyze batch')) return
   try {
     const response = await apiRequest('analyzer', '/api/v1/analyze/batch', {
       method: 'POST',
@@ -200,6 +369,7 @@ async function runBatchAnalyze() {
 }
 
 async function runTextAnalyze() {
+  if (!requireUserPermission('analyze text')) return
   try {
     const payload = {
       text: textForm.text,
@@ -244,6 +414,7 @@ async function getPatternById() {
 }
 
 async function createPattern() {
+  if (!requireAdminPermission('pattern create')) return
   try {
     const response = await apiRequest('analyzer', '/api/v1/patterns', {
       method: 'POST',
@@ -265,6 +436,7 @@ async function createPattern() {
 }
 
 async function updatePattern() {
+  if (!requireAdminPermission('pattern update')) return
   if (!updatePatternId.value) return
   try {
     const response = await apiRequest('analyzer', `/api/v1/patterns/${updatePatternId.value}`, {
@@ -287,6 +459,7 @@ async function updatePattern() {
 }
 
 async function deletePattern() {
+  if (!requireAdminPermission('pattern delete')) return
   if (!deletePatternId.value) return
   try {
     const response = await apiRequest('analyzer', `/api/v1/patterns/${deletePatternId.value}`, {
@@ -389,168 +562,188 @@ async function loadPerformanceStats() {
 onBeforeUnmount(() => {
   stopAsyncPolling()
 })
+
+onMounted(async () => {
+  await loadRuntimeSettings()
+  analyzeForm.area = Number(getSettingValue('search_default_area', analyzeForm.area))
+  analyzeForm.exact_search = Boolean(getSettingValue('search_default_exact', analyzeForm.exact_search))
+  analyzeForm.max_pages = Number(getSettingValue('search_default_max_pages', analyzeForm.max_pages))
+  analyzeForm.per_page = Number(getSettingValue('search_default_per_page', analyzeForm.per_page))
+  analyzeForm.use_cache = Boolean(getSettingValue('search_default_use_cache', analyzeForm.use_cache))
+})
 </script>
 
 <template>
   <div class="space-y-4">
-    <SectionHeader title="Analyzer Lab" subtitle="Полный цикл analyzer-service: sync/async/batch/text + patterns CRUD + stats." />
+    <SectionHeader title="Analyzer Lab" :subtitle="t('subtitle')" />
+
+    <section v-if="runLocked" class="panel border-amber-200 bg-amber-50 p-4">
+      <p class="text-sm text-amber-700">
+        {{ t('guestHint') }}
+      </p>
+    </section>
+    <section v-if="patternManageLocked" class="panel border-amber-200 bg-amber-50 p-4">
+      <p class="text-sm text-amber-700">
+        {{ t('adminHint') }}
+      </p>
+    </section>
 
     <section class="panel p-4">
-      <h3 class="panel-title text-base">Analyze (Sync + Async)</h3>
+      <h3 class="panel-title text-base">{{ t('analyzeSection') }}</h3>
       <div class="mt-3 grid gap-3 md:grid-cols-2 lg:grid-cols-3">
         <label class="text-sm">
-          <span class="mb-1 block text-slate-700">Vacancy title</span>
+          <span class="mb-1 block text-slate-700">{{ t('vacancyTitle') }}</span>
           <input v-model="analyzeForm.vacancy_title" class="form-input" />
         </label>
         <label class="text-sm">
-          <span class="mb-1 block text-slate-700">Technology</span>
+          <span class="mb-1 block text-slate-700">{{ t('technology') }}</span>
           <input v-model="analyzeForm.technology" class="form-input" />
         </label>
         <label class="text-sm">
-          <span class="mb-1 block text-slate-700">Area</span>
+          <span class="mb-1 block text-slate-700">{{ t('area') }}</span>
           <input v-model.number="analyzeForm.area" type="number" class="form-input" />
         </label>
         <label class="text-sm">
-          <span class="mb-1 block text-slate-700">Max pages</span>
+          <span class="mb-1 block text-slate-700">{{ t('maxPages') }}</span>
           <input v-model.number="analyzeForm.max_pages" type="number" class="form-input" />
         </label>
         <label class="text-sm">
-          <span class="mb-1 block text-slate-700">Per page</span>
+          <span class="mb-1 block text-slate-700">{{ t('perPage') }}</span>
           <input v-model.number="analyzeForm.per_page" type="number" class="form-input" />
         </label>
         <div class="space-y-2 text-sm">
-          <label class="inline-flex items-center gap-2"><input v-model="analyzeForm.exact_search" type="checkbox" class="h-4 w-4" />Exact search</label>
-          <label class="inline-flex items-center gap-2"><input v-model="analyzeForm.use_cache" type="checkbox" class="h-4 w-4" />Use cache</label>
+          <label class="inline-flex items-center gap-2"><input v-model="analyzeForm.exact_search" type="checkbox" class="h-4 w-4" />{{ t('exactSearch') }}</label>
+          <label class="inline-flex items-center gap-2"><input v-model="analyzeForm.use_cache" type="checkbox" class="h-4 w-4" />{{ t('useCache') }}</label>
         </div>
       </div>
       <div class="mt-3 flex flex-wrap gap-2">
-        <button class="btn-primary" @click="runSyncAnalyze">Run Sync</button>
-        <button class="btn-secondary" @click="startAsyncAnalyze">Run Async</button>
-        <button class="btn-secondary" @click="loadAsyncResult">Fetch Async Result</button>
+        <button class="btn-primary" :disabled="runLocked" @click="runSyncAnalyze">{{ t('runSync') }}</button>
+        <button class="btn-secondary" :disabled="runLocked" @click="startAsyncAnalyze">{{ t('runAsync') }}</button>
+        <button class="btn-secondary" :disabled="runLocked" @click="loadAsyncResult">{{ t('fetchAsyncResult') }}</button>
       </div>
       <div class="mt-4 grid gap-4 xl:grid-cols-2">
-        <JsonBlock title="Sync Result" :value="syncResult" />
-        <JsonBlock title="Async Task" :value="asyncTask" />
+        <JsonBlock :title="t('syncResult')" :value="syncResult" />
+        <JsonBlock :title="t('asyncTask')" :value="asyncTask" />
       </div>
     </section>
 
     <section class="panel p-4">
-      <h3 class="panel-title text-base">Batch + Text Analysis</h3>
+      <h3 class="panel-title text-base">{{ t('batchTextSection') }}</h3>
       <div class="mt-3 grid gap-3 lg:grid-cols-2">
         <div class="space-y-2">
           <label class="text-sm">
-            <span class="mb-1 block text-slate-700">Vacancy IDs</span>
+            <span class="mb-1 block text-slate-700">{{ t('vacancyIds') }}</span>
             <textarea v-model="batchForm.vacancy_ids" class="form-input h-24 font-mono" placeholder="id1,id2,id3"></textarea>
           </label>
           <label class="text-sm">
-            <span class="mb-1 block text-slate-700">Technologies</span>
+            <span class="mb-1 block text-slate-700">{{ t('technologies') }}</span>
             <input v-model="batchForm.technologies" class="form-input" />
           </label>
-          <label class="inline-flex items-center gap-2 text-sm"><input v-model="batchForm.exact_search" type="checkbox" class="h-4 w-4" />Exact search</label>
-          <button class="btn-primary" @click="runBatchAnalyze">Run Batch Analysis</button>
+          <label class="inline-flex items-center gap-2 text-sm"><input v-model="batchForm.exact_search" type="checkbox" class="h-4 w-4" />{{ t('exactSearch') }}</label>
+          <button class="btn-primary" :disabled="runLocked" @click="runBatchAnalyze">{{ t('runBatchAnalysis') }}</button>
         </div>
 
         <div class="space-y-2">
           <label class="text-sm">
-            <span class="mb-1 block text-slate-700">Text</span>
+            <span class="mb-1 block text-slate-700">{{ t('text') }}</span>
             <textarea v-model="textForm.text" class="form-input h-24"></textarea>
           </label>
           <label class="text-sm">
-            <span class="mb-1 block text-slate-700">Mode</span>
+            <span class="mb-1 block text-slate-700">{{ t('mode') }}</span>
             <select v-model="textForm.mode" class="form-input">
-              <option value="single">Single Technology</option>
-              <option value="multiple">Multiple Technologies</option>
+              <option value="single">{{ t('singleTechnology') }}</option>
+              <option value="multiple">{{ t('multipleTechnologies') }}</option>
             </select>
           </label>
           <label v-if="textForm.mode === 'single'" class="text-sm">
-            <span class="mb-1 block text-slate-700">Technology</span>
+            <span class="mb-1 block text-slate-700">{{ t('technology') }}</span>
             <input v-model="textForm.technology" class="form-input" />
           </label>
           <label v-else class="text-sm">
-            <span class="mb-1 block text-slate-700">Technologies CSV</span>
+            <span class="mb-1 block text-slate-700">{{ t('technologiesCsv') }}</span>
             <input v-model="textForm.technologies" class="form-input" />
           </label>
-          <button class="btn-secondary" @click="runTextAnalyze">Run Text Analysis</button>
+          <button class="btn-secondary" :disabled="runLocked" @click="runTextAnalyze">{{ t('runTextAnalysis') }}</button>
         </div>
       </div>
       <div class="mt-4 grid gap-4 xl:grid-cols-2">
-        <JsonBlock title="Batch Result" :value="batchResult" />
-        <JsonBlock title="Text Analysis" :value="textResult" />
+        <JsonBlock :title="t('batchResult')" :value="batchResult" />
+        <JsonBlock :title="t('textAnalysis')" :value="textResult" />
       </div>
     </section>
 
     <section class="panel p-4">
-      <h3 class="panel-title text-base">Patterns CRUD</h3>
+      <h3 class="panel-title text-base">{{ t('patternsCrud') }}</h3>
       <div class="mt-3 grid gap-3 lg:grid-cols-3">
-        <label class="text-sm"><span class="mb-1 block">ID</span><input v-model="patternForm.id" class="form-input" /></label>
-        <label class="text-sm"><span class="mb-1 block">Name</span><input v-model="patternForm.name" class="form-input" /></label>
-        <label class="text-sm"><span class="mb-1 block">Category</span><input v-model="patternForm.category" class="form-input" /></label>
-        <label class="text-sm lg:col-span-3"><span class="mb-1 block">Regex patterns (comma/newline)</span><textarea v-model="patternForm.patterns" class="form-input h-20 font-mono"></textarea></label>
-        <label class="text-sm lg:col-span-2"><span class="mb-1 block">Aliases</span><input v-model="patternForm.aliases" class="form-input" /></label>
-        <label class="text-sm"><span class="mb-1 block">Weight</span><input v-model.number="patternForm.weight" type="number" step="0.1" class="form-input" /></label>
-        <label class="text-sm lg:col-span-3"><span class="mb-1 block">Description</span><input v-model="patternForm.description" class="form-input" /></label>
+        <label class="text-sm"><span class="mb-1 block">{{ t('id') }}</span><input v-model="patternForm.id" class="form-input" /></label>
+        <label class="text-sm"><span class="mb-1 block">{{ t('name') }}</span><input v-model="patternForm.name" class="form-input" /></label>
+        <label class="text-sm"><span class="mb-1 block">{{ t('category') }}</span><input v-model="patternForm.category" class="form-input" /></label>
+        <label class="text-sm lg:col-span-3"><span class="mb-1 block">{{ t('regexPatterns') }}</span><textarea v-model="patternForm.patterns" class="form-input h-20 font-mono"></textarea></label>
+        <label class="text-sm lg:col-span-2"><span class="mb-1 block">{{ t('aliases') }}</span><input v-model="patternForm.aliases" class="form-input" /></label>
+        <label class="text-sm"><span class="mb-1 block">{{ t('weight') }}</span><input v-model.number="patternForm.weight" type="number" step="0.1" class="form-input" /></label>
+        <label class="text-sm lg:col-span-3"><span class="mb-1 block">{{ t('description') }}</span><input v-model="patternForm.description" class="form-input" /></label>
       </div>
       <div class="mt-3 flex flex-wrap gap-2">
-        <button class="btn-primary" @click="createPattern">Create</button>
-        <button class="btn-secondary" @click="searchPatterns">Search by Name</button>
-        <button class="btn-secondary" @click="loadPatterns">Load Patterns</button>
-        <button class="btn-secondary" @click="loadPatternMeta">Load Categories/Stats</button>
+        <button class="btn-primary" :disabled="patternManageLocked" @click="createPattern">{{ t('create') }}</button>
+        <button class="btn-secondary" @click="searchPatterns">{{ t('searchByName') }}</button>
+        <button class="btn-secondary" @click="loadPatterns">{{ t('loadPatterns') }}</button>
+        <button class="btn-secondary" @click="loadPatternMeta">{{ t('loadCategoriesStats') }}</button>
       </div>
 
       <div class="mt-4 grid gap-3 md:grid-cols-2">
         <label class="text-sm">
-          <span class="mb-1 block">Pattern ID for get/update</span>
+          <span class="mb-1 block">{{ t('patternIdGetUpdate') }}</span>
           <input v-model="updatePatternId" class="form-input" />
           <div class="mt-2 flex gap-2">
-            <button class="btn-secondary" @click="getPatternById">Get</button>
-            <button class="btn-secondary" @click="updatePattern">Update</button>
+            <button class="btn-secondary" @click="getPatternById">{{ t('get') }}</button>
+            <button class="btn-secondary" :disabled="patternManageLocked" @click="updatePattern">{{ t('update') }}</button>
           </div>
         </label>
         <label class="text-sm">
-          <span class="mb-1 block">Pattern ID for delete</span>
+          <span class="mb-1 block">{{ t('patternIdDelete') }}</span>
           <input v-model="deletePatternId" class="form-input" />
           <div class="mt-2 flex gap-2">
-            <button class="btn-danger" @click="deletePattern">Delete</button>
+            <button class="btn-danger" :disabled="patternManageLocked" @click="deletePattern">{{ t('delete') }}</button>
           </div>
         </label>
       </div>
 
       <div class="mt-4 grid gap-4 xl:grid-cols-2">
-        <JsonBlock title="Patterns list" :value="patternsState.patterns" />
-        <JsonBlock title="Pattern details" :value="patternsState.patternDetails" />
-        <JsonBlock title="Pattern search" :value="patternsState.searchResult" />
-        <JsonBlock title="Pattern categories" :value="patternsState.categories" />
-        <JsonBlock title="Pattern stats" :value="patternsState.stats" />
+        <JsonBlock :title="t('patternsList')" :value="patternsState.patterns" />
+        <JsonBlock :title="t('patternDetails')" :value="patternsState.patternDetails" />
+        <JsonBlock :title="t('patternSearch')" :value="patternsState.searchResult" />
+        <JsonBlock :title="t('patternCategories')" :value="patternsState.categories" />
+        <JsonBlock :title="t('patternStats')" :value="patternsState.stats" />
       </div>
     </section>
 
     <section class="panel p-4">
-      <h3 class="panel-title text-base">Analyzer Stats</h3>
+      <h3 class="panel-title text-base">{{ t('analyzerStats') }}</h3>
       <div class="mt-3 grid gap-3 lg:grid-cols-4">
-        <label class="text-sm"><span class="mb-1 block">Summary hours</span><input v-model.number="statsForm.summaryHours" type="number" class="form-input" /></label>
-        <label class="text-sm"><span class="mb-1 block">Technology</span><input v-model="statsForm.technology" class="form-input" /></label>
-        <label class="text-sm"><span class="mb-1 block">Tech days</span><input v-model.number="statsForm.techDays" type="number" class="form-input" /></label>
-        <label class="text-sm"><span class="mb-1 block">Comparison days</span><input v-model.number="statsForm.comparisonDays" type="number" class="form-input" /></label>
-        <label class="text-sm lg:col-span-3"><span class="mb-1 block">Comparison technologies CSV</span><input v-model="statsForm.comparisonTechs" class="form-input" /></label>
-        <label class="text-sm"><span class="mb-1 block">Performance hours</span><input v-model.number="statsForm.performanceHours" type="number" class="form-input" /></label>
+        <label class="text-sm"><span class="mb-1 block">{{ t('summaryHours') }}</span><input v-model.number="statsForm.summaryHours" type="number" class="form-input" /></label>
+        <label class="text-sm"><span class="mb-1 block">{{ t('technology') }}</span><input v-model="statsForm.technology" class="form-input" /></label>
+        <label class="text-sm"><span class="mb-1 block">{{ t('techDays') }}</span><input v-model.number="statsForm.techDays" type="number" class="form-input" /></label>
+        <label class="text-sm"><span class="mb-1 block">{{ t('comparisonDays') }}</span><input v-model.number="statsForm.comparisonDays" type="number" class="form-input" /></label>
+        <label class="text-sm lg:col-span-3"><span class="mb-1 block">{{ t('comparisonTechCsv') }}</span><input v-model="statsForm.comparisonTechs" class="form-input" /></label>
+        <label class="text-sm"><span class="mb-1 block">{{ t('performanceHours') }}</span><input v-model.number="statsForm.performanceHours" type="number" class="form-input" /></label>
       </div>
       <div class="mt-3 flex flex-wrap gap-2">
-        <button class="btn-primary" @click="loadSummaryStats">Summary</button>
-        <button class="btn-secondary" @click="loadTechnologyStats">Technology</button>
-        <button class="btn-secondary" @click="loadComparisonStats">Comparison</button>
-        <button class="btn-secondary" @click="loadPerformanceStats">Performance + Cache</button>
+        <button class="btn-primary" @click="loadSummaryStats">{{ t('summary') }}</button>
+        <button class="btn-secondary" @click="loadTechnologyStats">{{ t('technology') }}</button>
+        <button class="btn-secondary" @click="loadComparisonStats">{{ t('comparison') }}</button>
+        <button class="btn-secondary" @click="loadPerformanceStats">{{ t('performanceCache') }}</button>
       </div>
       <div class="mt-4 grid gap-4 xl:grid-cols-2">
-        <JsonBlock title="Summary" :value="analyzerStats.summary" />
-        <JsonBlock title="Technology stats" :value="analyzerStats.technology" />
-        <JsonBlock title="Comparison" :value="analyzerStats.comparison" />
-        <JsonBlock title="Performance" :value="analyzerStats.performance" />
-        <JsonBlock title="Cache stats" :value="analyzerStats.cache" />
+        <JsonBlock :title="t('summary')" :value="analyzerStats.summary" />
+        <JsonBlock :title="t('technologyStats')" :value="analyzerStats.technology" />
+        <JsonBlock :title="t('comparison')" :value="analyzerStats.comparison" />
+        <JsonBlock :title="t('performance')" :value="analyzerStats.performance" />
+        <JsonBlock :title="t('cacheStats')" :value="analyzerStats.cache" />
       </div>
     </section>
 
     <section v-if="errors.length" class="panel border-rose-200 bg-rose-50 p-4">
-      <h3 class="panel-title text-base text-rose-700">Errors</h3>
+      <h3 class="panel-title text-base text-rose-700">{{ t('errors') }}</h3>
       <ul class="mt-2 list-disc space-y-1 pl-5 text-sm text-rose-700">
         <li v-for="item in errors" :key="item">{{ item }}</li>
       </ul>

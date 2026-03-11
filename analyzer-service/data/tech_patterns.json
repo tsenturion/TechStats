@@ -50,6 +50,25 @@
       ],
       "description": "Язык программирования Java и его экосистема"
     },
+    "csharp": {
+      "name": "C#",
+      "category": "programming_language",
+      "patterns": [
+        "(?<!\\w)c#(?!\\w)",
+        "\\bcsharp\\b",
+        "\\bc\\s*sharp\\b",
+        "(?<!\\w)asp\\.?net(?!\\w)"
+      ],
+      "weight": 1.0,
+      "aliases": [
+        "c#",
+        "csharp",
+        "c sharp",
+        "asp.net",
+        "aspnet"
+      ],
+      "description": "Язык программирования C# и платформа ASP.NET"
+    },
     "javascript": {
       "name": "JavaScript",
       "category": "programming_language",
@@ -73,11 +92,25 @@
         "nodejs",
         "ts",
         "typescript",
-        "react",
         "angular",
         "vue"
       ],
       "description": "JavaScript и его фреймворки"
+    },
+    "react": {
+      "name": "React",
+      "category": "framework",
+      "patterns": [
+        "\\breact\\b",
+        "\\breact\\.?js\\b",
+        "\\breactjs\\b"
+      ],
+      "weight": 1.0,
+      "aliases": [
+        "reactjs",
+        "react.js"
+      ],
+      "description": "React framework"
     },
     "sql": {
       "name": "SQL",
@@ -201,12 +234,18 @@
     "java17": "java",
     "spring": "java",
     "hibernate": "java",
+    "c#": "csharp",
+    "csharp": "csharp",
+    "c sharp": "csharp",
+    "asp.net": "csharp",
+    "aspnet": "csharp",
     "js": "javascript",
     "node": "javascript",
     "nodejs": "javascript",
     "ts": "javascript",
     "typescript": "javascript",
-    "react": "javascript",
+    "reactjs": "react",
+    "react.js": "react",
     "angular": "javascript",
     "vue": "javascript",
     "postgres": "sql",
@@ -228,6 +267,6 @@
   "metadata": {
     "version": "1.0.0",
     "loaded_at": 2402.83,
-    "count": 8
+    "count": 10
   }
 }

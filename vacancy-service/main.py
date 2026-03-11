@@ -1,25 +1,26 @@
 # C:\Users\user\Desktop\TechStats\vacancy-service\main.py
-import asyncio
 import time
 from contextlib import asynccontextmanager
-from typing import Dict, Any, List
 
-import httpx
-import redis.asyncio as redis
-from fastapi import FastAPI, HTTPException, Query, Depends, Request
+from fastapi import FastAPI, Request
+from fastapi_health import health as healthcheck_route
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
+from slowapi.util import get_remote_address
 import structlog
 import uvicorn
-from prometheus_client import Counter, Histogram, generate_latest
+from prometheus_client import Counter, Histogram
 
 from config import settings
 from app.middleware import RequestLoggingMiddleware, ResponseTimeMiddleware
-from app.routers import vacancies, health, metrics
+from app.routers import vacancies, health as health_router, metrics
 from app.cache import cache_manager
 from app.hh_client import HHClient
 from app.rate_limiter import RateLimiter
+from shared.observability import setup_correlation_middleware, setup_prometheus_instrumentation
 
 # Настройка логирования
 logger = structlog.get_logger()
@@ -86,6 +87,9 @@ app = FastAPI(
     lifespan=lifespan
 )
 
+setup_correlation_middleware(app)
+setup_prometheus_instrumentation(app, expose=False)
+
 # Настройка middleware
 app.add_middleware(
     CORSMiddleware,
@@ -102,10 +106,29 @@ app.add_middleware(
     allowed_hosts=["*"] if settings.debug else ["techstats.com", "*.techstats.com"]
 )
 
+limiter = Limiter(
+    key_func=get_remote_address,
+    storage_uri=settings.redis_url,
+    default_limits=[f"{settings.hh_rate_limit_per_second * 60}/minute"],
+)
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
 # Подключение роутеров
 app.include_router(vacancies.router, prefix="/api/v1", tags=["vacancies"])
-app.include_router(health.router, prefix="/api/v1", tags=["health"])
+app.include_router(health_router.router, prefix="/api/v1", tags=["health"])
 app.include_router(metrics.router, prefix="/api/v1", tags=["metrics"])
+
+
+async def _redis_ready() -> bool:
+    return bool(cache_manager.redis_client)
+
+
+app.add_api_route(
+    "/api/v1/health/ready",
+    healthcheck_route([_redis_ready]),
+    tags=["health"],
+)
 
 
 @app.middleware("http")
@@ -118,7 +141,7 @@ async def metrics_middleware(request: Request, call_next):
     try:
         response = await call_next(request)
         status_code = response.status_code
-    except Exception as e:
+    except Exception:
         status_code = 500
         response = JSONResponse(
             status_code=500,

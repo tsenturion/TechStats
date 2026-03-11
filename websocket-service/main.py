@@ -6,21 +6,26 @@ from typing import Dict, Any
 import signal
 import sys
 
-import httpx
 import redis.asyncio as redis
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi_health import health as healthcheck_route
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
+from slowapi.util import get_remote_address
 import structlog
 import uvicorn
 from prometheus_client import Counter, Histogram, Gauge
 
 from config import settings
 from app.middleware import RequestLoggingMiddleware, WebSocketMiddleware
-from app.routers import websocket_router, health, metrics, admin
+from app.routers import websocket_router, health as health_router, metrics, admin
 from app.connection_manager import ConnectionManager
 from app.session_store import SessionStore
 from app.analysis_proxy import AnalysisProxy
+from shared.http_client import build_async_client
+from shared.observability import setup_correlation_middleware, setup_prometheus_instrumentation
 
 # Настройка логирования
 logger = structlog.get_logger()
@@ -72,6 +77,7 @@ async def lifespan(app: FastAPI):
     
     # Инициализация менеджера соединений
     connection_manager = ConnectionManager()
+    await connection_manager.initialize_pubsub()
     app.state.connection_manager = connection_manager
     logger.info("Connection manager initialized")
     
@@ -82,21 +88,21 @@ async def lifespan(app: FastAPI):
     logger.info("Session store initialized")
     
     # Инициализация HTTP клиентов для других сервисов
-    analyzer_client = httpx.AsyncClient(
+    analyzer_client = build_async_client(
         base_url=settings.analyzer_service_url,
         timeout=30.0,
         headers={"User-Agent": f"TechStats WebSocket/{settings.version}"}
     )
     app.state.analyzer_client = analyzer_client
     
-    vacancy_client = httpx.AsyncClient(
+    vacancy_client = build_async_client(
         base_url=settings.vacancy_service_url,
         timeout=30.0,
         headers={"User-Agent": f"TechStats WebSocket/{settings.version}"}
     )
     app.state.vacancy_client = vacancy_client
     
-    cache_client = httpx.AsyncClient(
+    cache_client = build_async_client(
         base_url=settings.cache_service_url,
         timeout=10.0,
         headers={"User-Agent": f"TechStats WebSocket/{settings.version}"}
@@ -123,7 +129,7 @@ async def lifespan(app: FastAPI):
     logger.info("Background tasks started")
     
     # Обработка сигналов для graceful shutdown
-    def handle_shutdown(signum, frame):
+    def handle_shutdown(signum, _frame):
         logger.info("Received shutdown signal")
         sys.exit(0)
     
@@ -144,6 +150,7 @@ async def lifespan(app: FastAPI):
     
     # Закрытие соединений
     await connection_manager.disconnect_all()
+    await connection_manager.shutdown_pubsub()
     
     # Закрытие HTTP клиентов
     await analyzer_client.aclose()
@@ -185,6 +192,9 @@ app = FastAPI(
     lifespan=lifespan
 )
 
+setup_correlation_middleware(app)
+setup_prometheus_instrumentation(app, expose=False)
+
 # Настройка middleware
 app.add_middleware(
     CORSMiddleware,
@@ -201,11 +211,30 @@ app.add_middleware(
     allowed_hosts=["*"] if settings.debug else ["techstats.com", "*.techstats.com"]
 )
 
+limiter = Limiter(
+    key_func=get_remote_address,
+    storage_uri=settings.redis_url,
+    default_limits=["1200/minute"],
+)
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
 # Подключение роутеров
 app.include_router(websocket_router.router, prefix="/api/v1", tags=["websocket"])
-app.include_router(health.router, prefix="/api/v1", tags=["health"])
+app.include_router(health_router.router, prefix="/api/v1", tags=["health"])
 app.include_router(metrics.router, prefix="/api/v1", tags=["metrics"])
 app.include_router(admin.router, prefix="/api/v1/admin", tags=["admin"])
+
+
+async def _redis_ready() -> bool:
+    return hasattr(app.state, "redis_client") and bool(app.state.redis_client)
+
+
+app.add_api_route(
+    "/api/v1/health/ready",
+    healthcheck_route([_redis_ready]),
+    tags=["health"],
+)
 
 
 @app.get("/")

@@ -25,6 +25,24 @@ scrape_configs:
     scrape_interval: 10s
     scrape_timeout: 5s
 
+  - job_name: 'analyzer-service'
+    static_configs:
+      - targets: ['analyzer-service:8002']
+        labels:
+          service: 'analyzer-service'
+    metrics_path: '/api/v1/metrics'
+    scrape_interval: 10s
+    scrape_timeout: 5s
+
+  - job_name: 'websocket-service'
+    static_configs:
+      - targets: ['websocket-service:8004']
+        labels:
+          service: 'websocket-service'
+    metrics_path: '/api/v1/metrics'
+    scrape_interval: 10s
+    scrape_timeout: 5s
+
   - job_name: 'redis'
     static_configs:
       - targets: ['redis:6379']

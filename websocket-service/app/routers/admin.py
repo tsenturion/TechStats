@@ -5,6 +5,7 @@ from typing import Optional
 from fastapi import APIRouter, HTTPException, Depends, Request, Query
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 import structlog
+from authlib.jose import jwt
 
 from config import settings
 
@@ -15,16 +16,30 @@ logger = structlog.get_logger()
 
 async def verify_admin_token(credentials: HTTPAuthorizationCredentials = Depends(security)):
     """Проверка токена администратора"""
-    # В production здесь была бы полноценная проверка JWT
-    admin_token = settings.admin_token
-    
-    if credentials.credentials != admin_token:
-        raise HTTPException(
-            status_code=403,
-            detail="Invalid admin token"
-        )
-    
-    return True
+    token = str(credentials.credentials or "").strip()
+    if not token:
+        raise HTTPException(status_code=403, detail="Empty admin token")
+
+    # Backward-compatible static admin token.
+    if token == settings.admin_token:
+        return {"auth_type": "static_token"}
+
+    # OAuth2-style bearer JWT with admin role.
+    try:
+        claims = jwt.decode(token, settings.jwt_secret_key)
+        claims.validate()
+    except Exception:
+        raise HTTPException(status_code=403, detail="Invalid admin token")
+
+    role = str(claims.get("role", "")).lower()
+    if role != "admin":
+        raise HTTPException(status_code=403, detail="Admin role required")
+
+    return {
+        "auth_type": "jwt",
+        "subject": claims.get("sub"),
+        "role": role,
+    }
 
 
 @router.get("/connections")
