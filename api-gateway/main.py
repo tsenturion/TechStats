@@ -91,14 +91,6 @@ setup_correlation_middleware(app)
 setup_prometheus_instrumentation(app, expose=False)
 
 # Настройка middleware
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=settings.cors_origins,
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
 app.add_middleware(RequestLoggingMiddleware)
 app.add_middleware(ResponseTimeMiddleware)
 app.add_middleware(AuthenticationMiddleware)
@@ -106,6 +98,15 @@ app.add_middleware(ServiceHealthMiddleware)
 app.add_middleware(
     TrustedHostMiddleware,
     allowed_hosts=["*"] if settings.debug else ["techstats.com", "*.techstats.com"]
+)
+# CORS should be outermost so auth/permission responses keep CORS headers
+# and are visible to browser clients (instead of opaque "Network Error").
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=settings.cors_origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 # Настройка rate limiting

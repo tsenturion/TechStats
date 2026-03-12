@@ -154,11 +154,48 @@ def test_search_non_exact_name_uses_default_hh_field_and_title_includes_filter(m
     payload = response.json()
 
     assert payload["search_params"]["title_contains_mode"] is True
-    assert payload["search_params"]["effective_search_field"] is None
+    assert payload["search_params"]["effective_search_field"] == "name"
     assert hh_client.search_calls
-    assert hh_client.search_calls[0]["search_field"] is None
+    assert hh_client.search_calls[0]["search_field"] == "name"
     names = [item["name"] for item in payload["items"]]
     assert names == ["Инженер-химия", "Менеджер нефтехимия"]
+
+
+def test_search_non_exact_name_multiword_does_not_overfilter_results(monkeypatch):
+    async def fake_cache_search(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr(vacancies_module.cache_manager, "search_vacancies_cache", fake_cache_search)
+
+    class TokenAwareHHClient(FakeHHClient):
+        async def search_vacancies(self, **kwargs):
+            self.search_calls.append(kwargs)
+            return {
+                "items": [
+                    {"id": "1", "name": "Senior QA Python Engineer"},
+                    {"id": "2", "name": "Python Developer"},
+                    {"id": "3", "name": "QA engineer (Python)"},
+                    {"id": "4", "name": "QA Java Engineer"},
+                ],
+                "found": 4,
+                "pages": 1,
+            }
+
+    app, _, _ = _build_app(hh_client=TokenAwareHHClient())
+    client = TestClient(app)
+    response = client.get(
+        "/api/v1/search",
+        params={"query": "Python qa", "exact_search": False},
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    names = [item["name"] for item in payload["items"]]
+    assert names == [
+        "Senior QA Python Engineer",
+        "Python Developer",
+        "QA engineer (Python)",
+        "QA Java Engineer",
+    ]
 
 
 def test_search_non_exact_name_uses_dedicated_cache_field(monkeypatch):

@@ -74,6 +74,13 @@ function t(key) {
   return messages[language.value]?.[key] || messages.en[key] || key
 }
 
+function describeSetting(meta) {
+  if (language.value === 'ru') {
+    return meta?.description_ru || 'Описание отсутствует'
+  }
+  return meta?.description || '-'
+}
+
 const settingEntries = computed(() =>
   Object.keys(schema.value || {})
     .sort()
@@ -252,7 +259,7 @@ onMounted(() => {
                 <td>{{ item.meta.type }}</td>
                 <td>{{ item.meta.scope || '-' }}</td>
                 <td class="whitespace-normal">
-                  {{ item.meta.description || '-' }}
+                  {{ describeSetting(item.meta) }}
                   <div class="text-xs text-slate-500">
                     min: {{ item.meta.min ?? '-' }}, max: {{ item.meta.max ?? '-' }}
                   </div>

@@ -35,8 +35,9 @@ class DummyVacancyClient:
 
 
 class DummyBatchVacancyClient:
-    def __init__(self, payload_by_chunk):
+    def __init__(self, payload_by_chunk, payload_by_id=None):
         self.payload_by_chunk = payload_by_chunk
+        self.payload_by_id = payload_by_id or {}
         self.calls = []
 
     async def post(self, path, json=None, params=None, timeout=None):
@@ -47,6 +48,18 @@ class DummyBatchVacancyClient:
             raise payload
         if isinstance(payload, DummyResponse):
             return payload
+        return DummyResponse(200, payload)
+
+    async def get(self, path, params=None, timeout=None):
+        vacancy_id = str(path).rstrip("/").split("/")[-1]
+        self.calls.append((path, ("single", vacancy_id), params, timeout))
+        payload = self.payload_by_id.get(vacancy_id)
+        if isinstance(payload, Exception):
+            raise payload
+        if isinstance(payload, DummyResponse):
+            return payload
+        if payload is None:
+            return DummyResponse(404, {"detail": "not found"})
         return DummyResponse(200, payload)
 
 
@@ -205,6 +218,33 @@ async def test_fetch_detailed_vacancies_splits_retryable_failed_chunk_and_recove
 
 
 @pytest.mark.asyncio
+async def test_fetch_detailed_vacancies_recovers_missing_ids_from_partial_batch_payload():
+    client = DummyBatchVacancyClient(
+        {
+            ("1", "2", "3", "4"): {"vacancies": [{"id": "1"}, {"id": "2"}], "cache_stats": {"hits": 0, "misses": 4}},
+            ("3",): {"vacancies": [{"id": "3"}], "cache_stats": {"hits": 0, "misses": 1}},
+            ("4",): {"vacancies": [], "cache_stats": {"hits": 0, "misses": 1}},
+        },
+        payload_by_id={
+            "4": {"vacancy": {"id": "4"}},
+        },
+    )
+
+    result = await _fetch_detailed_vacancies(
+        vacancy_client=client,
+        vacancy_ids=["1", "2", "3", "4"],
+        use_cache=True,
+        batch_chunk_size=4,
+        request_retry_attempts=1,
+        chunk_hard_timeout_sec=1,
+    )
+
+    assert [item["id"] for item in result["vacancies"]] == ["1", "2", "3", "4"]
+    assert result["missing_ids"] == []
+    assert result["failed_chunks"] == []
+
+
+@pytest.mark.asyncio
 async def test_fetch_detailed_vacancies_emits_progress_with_loaded_counts():
     client = DummyBatchVacancyClient(
         {
@@ -238,9 +278,11 @@ async def test_fetch_detailed_vacancies_emits_progress_with_loaded_counts():
 def test_is_complete_cached_result_requires_with_and_without_lists():
     complete = {
         "total_vacancies": 3,
+        "requested_vacancies": 3,
         "duplicate_vacancies_count": 1,
         "vacancies_with_tech": [{"id": "1", "text_match_count": 1, "key_skills_match_count": 0}],
         "vacancies_without_tech": [{"id": "2"}, {"id": "3"}],
+        "unprocessed_vacancy_ids": [],
     }
     incomplete = {
         "total_vacancies": 3,
@@ -297,6 +339,28 @@ def test_is_complete_cached_result_requires_duplicate_count_field():
         "vacancies_without_tech": [{"id": "2"}],
     }
     assert _is_complete_cached_result(incomplete) is False
+
+
+def test_is_complete_cached_result_rejects_unprocessed_or_requested_mismatch():
+    with_unprocessed = {
+        "total_vacancies": 2,
+        "requested_vacancies": 3,
+        "duplicate_vacancies_count": 0,
+        "vacancies_with_tech": [{"id": "1", "text_match_count": 1, "key_skills_match_count": 0}],
+        "vacancies_without_tech": [{"id": "2"}],
+        "unprocessed_vacancy_ids": ["3"],
+    }
+    with_requested_mismatch = {
+        "total_vacancies": 2,
+        "requested_vacancies": 1,
+        "duplicate_vacancies_count": 0,
+        "vacancies_with_tech": [{"id": "1", "text_match_count": 1, "key_skills_match_count": 0}],
+        "vacancies_without_tech": [{"id": "2"}],
+        "unprocessed_vacancy_ids": [],
+    }
+
+    assert _is_complete_cached_result(with_unprocessed) is False
+    assert _is_complete_cached_result(with_requested_mismatch) is False
 
 
 def test_calculate_duplicate_metrics_by_employer_name_title_and_description():

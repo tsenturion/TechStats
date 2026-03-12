@@ -272,13 +272,49 @@ SETTINGS_SCHEMA: Dict[str, Dict[str, Any]] = {
     },
 }
 
+SETTINGS_DESCRIPTIONS_RU: Dict[str, str] = {
+    "search_default_area": "Регион HH по умолчанию для поисковых форм.",
+    "search_default_exact": "Значение exact_search по умолчанию.",
+    "search_default_use_cache": "Значение use_cache по умолчанию.",
+    "search_default_max_pages": "Значение max_pages по умолчанию для новых анализов.",
+    "search_default_per_page": "Значение per_page по умолчанию для новых анализов.",
+    "search_max_pages_hard_limit": "Жесткий лимит max_pages в запросах.",
+    "search_per_page_hard_limit": "Жесткий лимит per_page в запросах.",
+    "vacancy_batch_max_ids": "Максимум ID вакансий в одном batch-запросе к vacancy-service.",
+    "gateway_vacancy_request_timeout_sec": "Таймаут gateway для вызовов vacancy-service.",
+    "gateway_analyzer_request_timeout_sec": "Таймаут gateway для вызовов analyzer-service.",
+    "gateway_vacancy_request_delay_ms": "Дополнительная задержка перед запросом в vacancy-service.",
+    "gateway_analyzer_request_delay_ms": "Дополнительная задержка перед запросом в analyzer-service.",
+    "analysis_default_use_cache": "Значение use_cache по умолчанию для эндпоинтов анализа.",
+    "analysis_max_pages_hard_limit": "Жесткий лимит max_pages в пайплайне анализатора.",
+    "analysis_per_page_hard_limit": "Жесткий лимит per_page в пайплайне анализатора.",
+    "live_progress_update_interval_sec": "Интервал обновления прогресса Live Analysis.",
+    "live_progress_keepalive_interval_sec": "Интервал keepalive-обновлений при отсутствии изменений прогресса.",
+    "live_progress_batch_size": "Размер batch для pseudo-progress в Live Analysis.",
+    "live_vacancy_request_timeout_sec": "Таймаут вызовов vacancy-service внутри Live Analysis.",
+    "live_analyzer_request_timeout_sec": "Таймаут одного запроса к analyzer-service внутри Live Analysis.",
+    "live_analyzer_total_timeout_sec": "Общий таймаут ожидания async-задачи analyzer в Live Analysis.",
+    "live_max_total_vacancies": "Жесткий лимит общего числа вакансий на один Live Analysis.",
+    "hh_rate_limit_per_second": "Runtime-лимит запросов к HH в секунду.",
+    "hh_rate_limit_per_day": "Runtime-лимит запросов к HH в день.",
+    "analyzer_batch_size": "Размер batch для поиска паттернов в analyzer-service.",
+    "analyzer_detail_request_timeout_sec": "Таймаут одного запроса analyzer-service к batch endpoint vacancy-service.",
+    "analyzer_detail_retry_attempts": "Количество retry для вызовов analyzer-service к batch endpoint vacancy-service.",
+    "analyzer_detail_chunk_hard_timeout_sec": "Жесткий таймаут загрузки деталей для одного batch-чанка в analyzer-service.",
+    "auth_access_token_expire_minutes": "Срок жизни access JWT токена gateway (в минутах).",
+    "auth_refresh_token_expire_minutes": "Срок жизни refresh JWT токена gateway (в минутах).",
+}
+
 
 def runtime_settings_defaults() -> Dict[str, Any]:
     return {key: meta["default"] for key, meta in SETTINGS_SCHEMA.items()}
 
 
 def runtime_settings_schema() -> Dict[str, Dict[str, Any]]:
-    return copy.deepcopy(SETTINGS_SCHEMA)
+    schema = copy.deepcopy(SETTINGS_SCHEMA)
+    for key, meta in schema.items():
+        meta["description_ru"] = SETTINGS_DESCRIPTIONS_RU.get(key, meta.get("description", ""))
+    return schema
 
 
 def _normalize_bool(value: Any) -> bool:

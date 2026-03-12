@@ -2,6 +2,7 @@ from pathlib import Path
 import sys
 
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.testclient import TestClient
 import pytest
 
@@ -25,6 +26,13 @@ from app.security import UserRole, create_access_token
 def create_test_app():
     app = FastAPI()
     app.add_middleware(AuthenticationMiddleware)
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
     app.include_router(auth_router, prefix="/api/v1")
     app.include_router(runtime_settings_router, prefix="/api/v1")
     return app
@@ -141,6 +149,7 @@ def test_runtime_public_available_without_auth(client):
     assert "settings" in payload
     assert "schema" in payload
     assert "search_default_area" in payload["settings"]
+    assert payload["schema"]["analysis_default_use_cache"]["description_ru"].startswith("Значение use_cache")
 
 
 def test_runtime_settings_requires_user_or_admin(client):
@@ -150,6 +159,12 @@ def test_runtime_settings_requires_user_or_admin(client):
     authorized = client.get("/api/v1/runtime-settings", headers=_auth_header(UserRole.user, "john"))
     assert authorized.status_code == 200
     assert "settings" in authorized.json()
+
+
+def test_admin_runtime_settings_unauthorized_includes_cors_headers(client):
+    response = client.get("/api/v1/admin/runtime-settings", headers={"Origin": "http://localhost:8088"})
+    assert response.status_code == 401
+    assert response.headers.get("access-control-allow-origin") in {"*", "http://localhost:8088"}
 
 
 def test_admin_runtime_settings_role_enforcement(client):

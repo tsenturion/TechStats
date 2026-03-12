@@ -17,6 +17,13 @@ def _normalize_for_contains(value: Any) -> str:
     return " ".join(str(value or "").strip().lower().split())
 
 
+def _title_matches_query_tokens(title: Any, query_tokens: list[str]) -> bool:
+    normalized_title = _normalize_for_contains(title)
+    if not normalized_title:
+        return False
+    return all(token in normalized_title for token in query_tokens)
+
+
 def _filter_items_by_title_contains(items: Any, query: str) -> list:
     if not isinstance(items, list):
         return []
@@ -24,11 +31,18 @@ def _filter_items_by_title_contains(items: Any, query: str) -> list:
     normalized_query = _normalize_for_contains(query)
     if not normalized_query:
         return items
+    query_tokens = [token for token in normalized_query.split(" ") if token]
+    if not query_tokens:
+        return items
+    if len(query_tokens) > 1:
+        # For multi-word non-exact search, trust HH relevance from `search_field=name`
+        # and avoid over-restricting title matches locally.
+        return [item for item in items if isinstance(item, dict)]
 
     return [
         item
         for item in items
-        if normalized_query in _normalize_for_contains(item.get("name", "") if isinstance(item, dict) else "")
+        if isinstance(item, dict) and _title_matches_query_tokens(item.get("name", ""), query_tokens)
     ]
 
 
@@ -75,7 +89,9 @@ async def search_vacancies(
         search_query = f'"{query}"'
     else:
         search_query = query
-    effective_search_field = None if non_exact_name_contains_mode else search_field
+    # For non-exact title mode keep HH search in title field and additionally
+    # apply local token-based "contains" filter (order-independent).
+    effective_search_field = search_field
     cache_search_field = "default_title_contains" if non_exact_name_contains_mode else search_field
     
     # Проверка кэша

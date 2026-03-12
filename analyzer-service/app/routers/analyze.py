@@ -414,6 +414,27 @@ async def _fetch_detailed_vacancies(
             return await request_coro
         return await asyncio.wait_for(request_coro, timeout=normalized_chunk_timeout)
 
+    async def _request_single_vacancy(vacancy_id: str) -> Optional[Dict[str, Any]]:
+        single_attempts = max(2, retry_attempts)
+        single_response = await _request_vacancy_service_with_retry(
+            vacancy_client=vacancy_client,
+            method="GET",
+            path=f"/api/v1/vacancies/{vacancy_id}",
+            params={"use_cache": use_cache},
+            request_timeout=normalized_request_timeout,
+            max_attempts=single_attempts,
+        )
+        if int(single_response.status_code) != 200:
+            return None
+        payload = single_response.json()
+        vacancy_payload = payload.get("vacancy")
+        if not isinstance(vacancy_payload, dict):
+            return None
+        vacancy_id_from_payload = vacancy_payload.get("id")
+        if vacancy_id_from_payload is None:
+            return None
+        return vacancy_payload
+
     pending_chunks = deque(
         [vacancy_ids[start:start + safe_chunk_size] for start in range(0, total_ids, safe_chunk_size)]
     )
@@ -503,13 +524,73 @@ async def _fetch_detailed_vacancies(
         chunk_vacancies = payload.get("vacancies", [])
         detailed_vacancies.extend(chunk_vacancies)
 
+        loaded_chunk_ids = set()
         for vacancy in chunk_vacancies:
             vacancy_id = vacancy.get("id")
             if vacancy_id:
-                loaded_ids.add(str(vacancy_id))
+                normalized_id = str(vacancy_id)
+                loaded_ids.add(normalized_id)
+                loaded_chunk_ids.add(normalized_id)
+                resolved_ids.add(normalized_id)
 
-        for vacancy_id in chunk_ids:
-            resolved_ids.add(str(vacancy_id))
+        missing_chunk_ids = [vacancy_id for vacancy_id in chunk_ids if vacancy_id not in loaded_chunk_ids]
+        if missing_chunk_ids:
+            logger.warning(
+                "Batch fetch returned partial data, retrying missing IDs",
+                chunk_size=len(chunk_ids),
+                loaded_count=len(loaded_chunk_ids),
+                missing_count=len(missing_chunk_ids),
+                missing_preview=missing_chunk_ids[:10],
+            )
+
+            if len(missing_chunk_ids) > 1:
+                midpoint = max(1, len(missing_chunk_ids) // 2)
+                left_chunk = missing_chunk_ids[:midpoint]
+                right_chunk = missing_chunk_ids[midpoint:]
+                if right_chunk:
+                    pending_chunks.appendleft(right_chunk)
+                if left_chunk:
+                    pending_chunks.appendleft(left_chunk)
+            else:
+                single_missing_id = missing_chunk_ids[0]
+                try:
+                    single_vacancy = await _request_single_vacancy(single_missing_id)
+                except Exception as exc:  # noqa: BLE001
+                    failed_chunks.append(
+                        {
+                            "vacancy_ids": [single_missing_id],
+                            "status_code": 504 if isinstance(exc, (asyncio.TimeoutError, httpx.TimeoutException)) else 500,
+                            "message": _format_exception_message(exc),
+                        }
+                    )
+                    resolved_ids.add(single_missing_id)
+                    logger.warning(
+                        "Single vacancy fallback request failed",
+                        vacancy_id=single_missing_id,
+                        error=_format_exception_message(exc),
+                    )
+                else:
+                    if single_vacancy:
+                        detailed_vacancies.append(single_vacancy)
+                        loaded_ids.add(single_missing_id)
+                        resolved_ids.add(single_missing_id)
+                        logger.info(
+                            "Recovered missing vacancy via single fallback request",
+                            vacancy_id=single_missing_id,
+                        )
+                    else:
+                        failed_chunks.append(
+                            {
+                                "vacancy_ids": [single_missing_id],
+                                "status_code": 404,
+                                "message": "Vacancy was not returned by batch response and could not be fetched individually",
+                            }
+                        )
+                        resolved_ids.add(single_missing_id)
+                        logger.warning(
+                            "Failed to recover missing vacancy via single fallback request",
+                            vacancy_id=single_missing_id,
+                        )
 
         cache_stats = payload.get("cache_stats") or {}
         try:
@@ -542,9 +623,11 @@ def _is_complete_cached_result(cached_result: Dict[str, Any]) -> bool:
         return False
 
     total = cached_result.get("total_vacancies")
+    requested = cached_result.get("requested_vacancies")
     with_tech = cached_result.get("vacancies_with_tech")
     without_tech = cached_result.get("vacancies_without_tech")
     duplicate_vacancies_count = cached_result.get("duplicate_vacancies_count")
+    unprocessed = cached_result.get("unprocessed_vacancy_ids")
 
     if not isinstance(total, int) or total < 0:
         return False
@@ -554,6 +637,14 @@ def _is_complete_cached_result(cached_result: Dict[str, Any]) -> bool:
         return False
     if duplicate_vacancies_count > total:
         return False
+    if requested is not None:
+        if not isinstance(requested, int) or requested < total:
+            return False
+    if unprocessed is not None:
+        if not isinstance(unprocessed, list):
+            return False
+        if len(unprocessed) > 0:
+            return False
 
     for item in with_tech:
         if not isinstance(item, dict):

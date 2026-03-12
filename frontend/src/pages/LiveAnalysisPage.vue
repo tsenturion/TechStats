@@ -70,6 +70,7 @@ const messages = {
     technologyShare: 'Доля технологии в вакансиях',
     duplicatesSuffix: 'одинаковых',
     forTechnology: 'для',
+    processedCoverage: 'Обработано',
     streamTimeline: 'Stream Timeline',
     withTechnology: 'Vacancies With Technology',
     withoutTechnology: 'Vacancies Without Technology',
@@ -115,6 +116,7 @@ const messages = {
     technologyShare: 'Technology share in vacancies',
     duplicatesSuffix: 'duplicates',
     forTechnology: 'for',
+    processedCoverage: 'Processed',
     streamTimeline: 'Stream Timeline',
     withTechnology: 'Vacancies With Technology',
     withoutTechnology: 'Vacancies Without Technology',
@@ -164,6 +166,14 @@ const techVacanciesCount = computed(() => {
   const value = Number(candidate)
   return Number.isFinite(value) ? value : null
 })
+const requestedVacanciesCount = computed(() => {
+  const requested = Number(resultPayload.value?.requested_vacancies)
+  if (Number.isFinite(requested) && requested > 0) {
+    return requested
+  }
+  const total = Number(resultPayload.value?.total_vacancies)
+  return Number.isFinite(total) ? total : null
+})
 const totalVacanciesCount = computed(() => {
   const candidate = resultPayload.value?.total_vacancies
   const value = Number(candidate)
@@ -191,7 +201,7 @@ const duplicateVacanciesCount = computed(() => {
     return count + (item?.is_duplicate ? 1 : 0)
   }, 0)
 })
-const hasKpi = computed(() => technologySharePercent.value !== null || (techVacanciesCount.value !== null && totalVacanciesCount.value !== null))
+const hasKpi = computed(() => technologySharePercent.value !== null || (techVacanciesCount.value !== null && requestedVacanciesCount.value !== null))
 const withTechVacancies = computed(() => {
   const list = resultPayload.value?.vacancies_with_tech
   return Array.isArray(list) ? list : []
@@ -466,7 +476,7 @@ async function loadAllVacancies(paramsSnapshot) {
       })
     })
 
-    const totalFromResult = Number(resultPayload.value?.total_vacancies)
+    const totalFromResult = Number(resultPayload.value?.requested_vacancies ?? resultPayload.value?.total_vacancies)
     const hasTotalCap = Number.isFinite(totalFromResult) && totalFromResult > 0
     const fallbackList = Array.from(deduped.values())
     allVacancies.value = hasTotalCap ? fallbackList.slice(0, totalFromResult) : fallbackList
@@ -696,11 +706,17 @@ onMounted(async () => {
             <p v-if="technologySharePercent !== null" class="text-4xl font-extrabold leading-none text-brand-700">
               {{ technologySharePercent.toFixed(1) }}%
             </p>
-            <p v-if="techVacanciesCount !== null && totalVacanciesCount !== null" class="pb-1 text-lg font-semibold text-slate-700">
-              {{ techVacanciesCount }}/{{ totalVacanciesCount }}
+            <p v-if="techVacanciesCount !== null && requestedVacanciesCount !== null" class="pb-1 text-lg font-semibold text-slate-700">
+              {{ techVacanciesCount }}/{{ requestedVacanciesCount }}
               <span v-if="duplicateVacanciesCount !== null"> ({{ duplicateVacanciesCount }} {{ t('duplicatesSuffix') }})</span>
             </p>
           </div>
+          <p
+            v-if="totalVacanciesCount !== null && requestedVacanciesCount !== null && totalVacanciesCount < requestedVacanciesCount"
+            class="mt-2 text-xs text-amber-700"
+          >
+            {{ t('processedCoverage') }} {{ totalVacanciesCount }}/{{ requestedVacanciesCount }}
+          </p>
         </div>
         <p class="text-xs text-slate-500">{{ t('forTechnology') }} "{{ form.technology }}"</p>
       </div>
