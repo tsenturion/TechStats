@@ -275,7 +275,14 @@ class PatternMatcher:
         if has_symbol:
             regex = rf"(?<!\w){escaped}(?!\w)"
         else:
-            regex = rf"\b{escaped}\b"
+            # Для неизвестных "длинных" технологий делаем match по включению в токен:
+            # `test` -> `pytest`, `unittest`, `testing`.
+            # Для коротких терминов (go, qa) оставляем строгие границы, чтобы не ловить шум.
+            compact_len = len(compact)
+            if compact_len >= 4:
+                regex = rf"\b\w*{escaped}\w*\b"
+            else:
+                regex = rf"\b{escaped}\b"
 
         return re.compile(regex, re.IGNORECASE | re.UNICODE)
 

@@ -371,9 +371,15 @@ class TechPatternsLoader:
             tech_id = self.aliases[normalized]
             return self.patterns.get(tech_id)
         
-        # Поиск по частичному совпадению
+        # Поиск по префиксу (а не по произвольной подстроке),
+        # чтобы короткие запросы вроде "go" не маппились в "django".
         for tech_id, tech_data in self.patterns.items():
-            if normalized in tech_id or any(normalized in alias.lower() for alias in tech_data.get("aliases", [])):
+            candidates = [tech_id]
+            name = tech_data.get("name")
+            if name:
+                candidates.append(str(name))
+            candidates.extend(str(alias) for alias in tech_data.get("aliases", []))
+            if any(candidate.lower().startswith(normalized) for candidate in candidates):
                 return tech_data
         
         return None

@@ -26,6 +26,19 @@ async def test_default_patterns_include_alias_lookup_and_compiled_regex():
     assert csharp_compiled.search("Требуется опыт C# и ASP.NET")
 
 
+@pytest.mark.asyncio
+async def test_get_pattern_partial_lookup_uses_prefix_not_arbitrary_substring():
+    loader = TechPatternsLoader()
+    await loader._create_default_patterns()
+
+    python_by_prefix = loader.get_pattern("pyth")
+    no_false_positive_for_go = loader.get_pattern("go")
+
+    assert python_by_prefix is not None
+    assert python_by_prefix["name"] == "Python"
+    assert no_false_positive_for_go is None
+
+
 def test_add_and_remove_pattern_flow():
     loader = TechPatternsLoader()
     loader.patterns = {}

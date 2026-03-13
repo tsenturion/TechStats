@@ -34,6 +34,11 @@ class _KnownCSharpPatternsLoader:
         return set()
 
 
+class _NoopTextAnalyzer:
+    def process_text(self, text):  # noqa: ARG002
+        return []
+
+
 @pytest.mark.asyncio
 async def test_find_technology_fallback_matches_csharp_with_symbol():
     matcher = PatternMatcher(text_analyzer=None, patterns_loader=_UnknownTechPatternsLoader())
@@ -117,3 +122,31 @@ async def test_find_technology_fallback_csharp_symbol_query_matches_word_notatio
 
     assert result["found"] is True
     assert result["match_count"] >= 1
+
+
+@pytest.mark.asyncio
+async def test_find_technology_fallback_unknown_long_term_matches_inside_token():
+    matcher = PatternMatcher(text_analyzer=None, patterns_loader=_UnknownTechPatternsLoader())
+
+    result = await matcher.find_technology(
+        text={"description": "Тестовый стек: pytest, unittest, integration testing"},
+        technology="test",
+        search_fields=["description"],
+    )
+
+    assert result["found"] is True
+    assert result["match_count"] >= 3
+
+
+@pytest.mark.asyncio
+async def test_find_technology_fallback_unknown_short_term_keeps_word_boundaries():
+    matcher = PatternMatcher(text_analyzer=_NoopTextAnalyzer(), patterns_loader=_UnknownTechPatternsLoader())
+
+    result = await matcher.find_technology(
+        text={"description": "We use google cloud platform"},
+        technology="go",
+        search_fields=["description"],
+    )
+
+    assert result["found"] is False
+    assert result["match_count"] == 0
