@@ -27,15 +27,14 @@ async def test_default_patterns_include_alias_lookup_and_compiled_regex():
 
 
 @pytest.mark.asyncio
-async def test_get_pattern_partial_lookup_uses_prefix_not_arbitrary_substring():
+async def test_get_pattern_requires_exact_id_or_alias_without_prefix_matching():
     loader = TechPatternsLoader()
     await loader._create_default_patterns()
 
     python_by_prefix = loader.get_pattern("pyth")
     no_false_positive_for_go = loader.get_pattern("go")
 
-    assert python_by_prefix is not None
-    assert python_by_prefix["name"] == "Python"
+    assert python_by_prefix is None
     assert no_false_positive_for_go is None
 
 
