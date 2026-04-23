@@ -399,6 +399,19 @@ async def test_execute_analysis_sends_keepalive_when_progress_stalls():
     assert analyzing_messages
     assert all("Обработано вакансий:" in str(msg.get("message", "")) for msg in analyzing_messages)
 
+    completed_messages = [
+        msg
+        for msg in websocket.messages
+        if msg.get("type") == "progress" and msg.get("stage") == "completed"
+    ]
+    assert completed_messages
+    completed_metadata = completed_messages[-1].get("metadata", {})
+    assert completed_metadata.get("result_truncated") is True
+    assert completed_metadata.get("session_result_available") is True
+    assert isinstance(completed_metadata.get("result"), dict)
+    assert "vacancies_with_tech" not in completed_metadata.get("result", {})
+    assert "vacancies_without_tech" not in completed_metadata.get("result", {})
+
 
 @pytest.mark.asyncio
 async def test_execute_analysis_uses_total_timeout_separately_from_request_timeout():

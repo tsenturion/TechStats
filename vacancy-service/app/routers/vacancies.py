@@ -1,12 +1,12 @@
 # C:\Users\user\Desktop\TechStats\vacancy-service\app\routers\vacancies.py
 import asyncio
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 import httpx
 from fastapi import APIRouter, HTTPException, Query, Body, Request, Depends
 import structlog
 
 from app.cache import cache_manager
-from app.hh_client import HHClient
+from app.hh_client import HHClient, HHVacancySearchForbiddenError
 from app.rate_limiter import RateLimiter
 
 router = APIRouter()
@@ -64,6 +64,8 @@ async def search_vacancies(
     page: int = Query(0, description="Номер страницы"),
     per_page: int = Query(100, description="Количество вакансий на странице (макс 100)"),
     search_field: str = Query("name", description="Поле поиска (name, description, company_name)"),
+    date_from: Optional[str] = Query(None, description="Нижняя граница даты публикации (ISO-8601)"),
+    date_to: Optional[str] = Query(None, description="Верхняя граница даты публикации (ISO-8601)"),
     exact_search: bool = Query(True, description="Точный поиск"),
     use_cache: bool = Query(True, description="Использовать кэш"),
     hh_client: HHClient = Depends(get_hh_client),
@@ -72,6 +74,8 @@ async def search_vacancies(
     """
     Поиск вакансий с HH.ru
     """
+    cached_results = None
+
     # Валидация параметров
     if per_page > 100:
         per_page = 100
@@ -80,8 +84,10 @@ async def search_vacancies(
     
     if page < 0:
         page = 0
-    if page > 19:  # HH API ограничивает 20 страниц
-        page = 19
+    # HH API supports deeper pagination than 20 pages for many queries.
+    # Keep an upper safety bound to avoid obviously invalid requests.
+    if page > 99:
+        page = 99
     
     # Формирование поискового запроса
     non_exact_name_contains_mode = not exact_search and search_field == "name"
@@ -93,6 +99,8 @@ async def search_vacancies(
     # apply local token-based "contains" filter (order-independent).
     effective_search_field = search_field
     cache_search_field = "default_title_contains" if non_exact_name_contains_mode else search_field
+    if date_from or date_to:
+        cache_search_field = f"{cache_search_field}|date_from:{date_from or ''}|date_to:{date_to or ''}"
     
     # Проверка кэша
     if use_cache:
@@ -135,7 +143,9 @@ async def search_vacancies(
             area=area,
             page=page,
             per_page=per_page,
-            search_field=effective_search_field
+            search_field=effective_search_field,
+            date_from=date_from,
+            date_to=date_to,
         )
 
         if non_exact_name_contains_mode:
@@ -176,6 +186,8 @@ async def search_vacancies(
                 "per_page": per_page,
                 "search_field": search_field,
                 "effective_search_field": effective_search_field,
+                "date_from": date_from,
+                "date_to": date_to,
                 "title_contains_mode": non_exact_name_contains_mode,
                 "exact_search": exact_search
             },
@@ -184,6 +196,51 @@ async def search_vacancies(
         
         return enriched_results
         
+    except HHVacancySearchForbiddenError as e:
+        logger.warning("HH vacancy search is forbidden", query=query, error=str(e))
+
+        if use_cache and cached_results:
+            logger.info("Returning cached data due to HH forbidden response")
+            return {
+                "source": "cache_fallback",
+                "cached": True,
+                "error": str(e),
+                "timestamp": asyncio.get_event_loop().time(),
+                **cached_results
+            }
+
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "HH API temporarily blocked vacancy search (HTTP 403, captcha/anti-bot). "
+                "Попробуйте повторить запрос позже, включить use_cache или снизить интенсивность запросов. "
+                f"Details: {str(e)}"
+            )
+        )
+    except httpx.HTTPStatusError as e:
+        logger.error(
+            "Search upstream HTTP error",
+            query=query,
+            status_code=e.response.status_code if e.response else None,
+            error=str(e),
+        )
+
+        if use_cache and cached_results:
+            logger.info("Returning cached data due to upstream HTTP error")
+            return {
+                "source": "cache_fallback",
+                "cached": True,
+                "error": str(e),
+                "timestamp": asyncio.get_event_loop().time(),
+                **cached_results
+            }
+
+        upstream_status = int(e.response.status_code) if e.response is not None else 502
+        detail_text = str(e)
+        raise HTTPException(
+            status_code=upstream_status if 400 <= upstream_status < 500 else 502,
+            detail=f"Failed to search vacancies: {detail_text}",
+        )
     except Exception as e:
         logger.error("Search error", query=query, error=str(e))
         

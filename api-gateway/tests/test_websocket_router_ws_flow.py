@@ -73,8 +73,14 @@ def test_websocket_analyze_proxies_messages(monkeypatch):
         }
 
     dummy_context = DummyConnectContext()
+    captured_connect_kwargs = {}
+
+    def _fake_connect(*args, **kwargs):
+        captured_connect_kwargs.update(kwargs)
+        return dummy_context
+
     monkeypatch.setattr(websocket_module, "get_runtime_settings_effective", fake_runtime_settings)
-    monkeypatch.setattr(websocket_module.websockets, "connect", lambda *args, **kwargs: dummy_context)
+    monkeypatch.setattr(websocket_module.websockets, "connect", _fake_connect)
 
     token = create_access_token(username="user", role=UserRole.user, expires_minutes=30)
     client = TestClient(_app())
@@ -87,3 +93,4 @@ def test_websocket_analyze_proxies_messages(monkeypatch):
 
     assert dummy_context.backend.sent_payloads
     assert dummy_context.backend.sent_payloads[0]["technology"] == "python"
+    assert int(captured_connect_kwargs.get("max_size", 0)) > 1_000_000

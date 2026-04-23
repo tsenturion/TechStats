@@ -25,6 +25,18 @@ async def test_default_patterns_include_alias_lookup_and_compiled_regex():
     assert csharp_compiled is not None
     assert csharp_compiled.search("Требуется опыт C# и ASP.NET")
 
+    angular_pattern = loader.get_pattern("angular")
+    vue_pattern = loader.get_pattern("vue")
+    assert angular_pattern is not None
+    assert angular_pattern["name"] == "Angular"
+    assert vue_pattern is not None
+    assert vue_pattern["name"] == "Vue"
+
+    js_compiled = loader.get_compiled_pattern("javascript")
+    assert js_compiled is not None
+    assert js_compiled.search("nodejs backend")
+    assert not js_compiled.search("vue developer")
+
 
 @pytest.mark.asyncio
 async def test_get_pattern_requires_exact_id_or_alias_without_prefix_matching():
@@ -72,3 +84,33 @@ def test_add_pattern_rejects_invalid_regex_and_duplicate():
     assert loader.add_pattern("java", "Java", [r"\bjava\b"]) is False
 
     assert loader.add_pattern("bad", "Bad", ["("]) is False
+
+
+def test_normalize_patterns_schema_splits_javascript_and_framework_aliases():
+    loader = TechPatternsLoader()
+    loader.patterns = {
+        "javascript": {
+            "name": "JavaScript",
+            "category": "programming_language",
+            "patterns": [r"\bjavascript\b", r"\bangular\b", r"\bvue\b", r"\breact\b"],
+            "aliases": ["js", "angular", "vue", "reactjs"],
+            "weight": 1.0,
+            "description": "",
+        }
+    }
+    loader.categories = {"programming_language"}
+
+    changed = loader._normalize_patterns_schema()
+    loader._build_aliases()
+
+    assert changed is True
+    js_payload = loader.patterns["javascript"]
+    assert r"\bangular\b" not in js_payload["patterns"]
+    assert r"\bvue\b" not in js_payload["patterns"]
+    assert r"\breact\b" not in js_payload["patterns"]
+    assert "angular" not in js_payload["aliases"]
+    assert "vue" not in js_payload["aliases"]
+    assert "reactjs" not in js_payload["aliases"]
+    assert loader.aliases["angularjs"] == "angular"
+    assert loader.aliases["vuejs"] == "vue"
+    assert loader.aliases["reactjs"] == "react"

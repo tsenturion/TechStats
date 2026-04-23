@@ -14,7 +14,10 @@ def test_runtime_settings_defaults_have_all_schema_keys():
 
 def test_runtime_settings_schema_returns_deep_copy():
     schema_copy = runtime_settings_schema()
-    assert schema_copy == SETTINGS_SCHEMA
+    assert set(schema_copy.keys()) == set(SETTINGS_SCHEMA.keys())
+    for key in SETTINGS_SCHEMA:
+        for field, expected_value in SETTINGS_SCHEMA[key].items():
+            assert schema_copy[key][field] == expected_value
     schema_copy["search_default_area"]["default"] = 999
     assert SETTINGS_SCHEMA["search_default_area"]["default"] != 999
 

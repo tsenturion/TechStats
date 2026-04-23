@@ -35,8 +35,12 @@ class TechPatternsLoader:
             self.patterns = cached.get("patterns", {})
             self.categories = set(cached.get("categories", []))
             self.aliases = cached.get("aliases", {})
+            normalized = self._normalize_patterns_schema()
             self._build_aliases()
             self._compile_patterns()
+            if normalized:
+                await self._save_patterns_to_db()
+                await self._cache_patterns()
             logger.info("Patterns loaded from cache", count=len(self.patterns))
             return
 
@@ -67,8 +71,11 @@ class TechPatternsLoader:
                 return False
             self.patterns = loaded
             self.categories = {str(item.get("category", "other")) for item in loaded.values()}
+            normalized = self._normalize_patterns_schema()
             self._build_aliases()
             self._compile_patterns()
+            if normalized:
+                await asyncio.to_thread(self.repository.save_all, self.patterns)
             return True
         except Exception as exc:
             logger.warning("Failed to load patterns from SQL database", error=str(exc))
@@ -89,6 +96,7 @@ class TechPatternsLoader:
             self.patterns = data.get("patterns", {})
             self.categories = set(data.get("categories", []))
             self.aliases = data.get("aliases", {})
+            self._normalize_patterns_schema()
             self._build_aliases()
             self._compile_patterns()
             logger.info("Patterns loaded from file", count=len(self.patterns))
@@ -161,14 +169,11 @@ class TechPatternsLoader:
                     r'\bnodejs\b',
                     r'\btypescript\b',
                     r'\bts\b',
-                    r'\breact\b',
-                    r'\bangular\b',
-                    r'\bvue\b',
                     r'\bexpress\b',
                     r'\bnestjs\b'
                 ],
                 "weight": 1.0,
-                "aliases": ["js", "node", "nodejs", "ts", "typescript", "angular", "vue"],
+                "aliases": ["js", "node", "nodejs", "ts", "typescript"],
                 "description": "JavaScript и его фреймворки"
             },
             "react": {
@@ -182,6 +187,30 @@ class TechPatternsLoader:
                 "weight": 1.0,
                 "aliases": ["reactjs", "react.js"],
                 "description": "React framework"
+            },
+            "angular": {
+                "name": "Angular",
+                "category": "framework",
+                "patterns": [
+                    r'\bangular\b',
+                    r'\bangular\.?js\b',
+                    r'\bangularjs\b'
+                ],
+                "weight": 1.0,
+                "aliases": ["angularjs", "angular.js"],
+                "description": "Angular framework"
+            },
+            "vue": {
+                "name": "Vue",
+                "category": "framework",
+                "patterns": [
+                    r'\bvue\b',
+                    r'\bvue\.?js\b',
+                    r'\bvuejs\b'
+                ],
+                "weight": 1.0,
+                "aliases": ["vuejs", "vue.js"],
+                "description": "Vue framework"
             },
             "sql": {
                 "name": "SQL",
@@ -280,6 +309,68 @@ class TechPatternsLoader:
         self._compile_patterns()
         
         logger.info("Default patterns created", count=len(self.patterns))
+
+    def _normalize_patterns_schema(self) -> bool:
+        """Нормализация паттернов для точного поиска отдельных технологий."""
+        changed = False
+
+        js_payload = self.patterns.get("javascript")
+        if isinstance(js_payload, dict):
+            raw_patterns = [str(item) for item in js_payload.get("patterns", [])]
+            filtered_patterns = [
+                item for item in raw_patterns
+                if not any(token in item.lower() for token in ("react", "angular", "vue"))
+            ]
+            if filtered_patterns != raw_patterns:
+                js_payload["patterns"] = filtered_patterns
+                changed = True
+
+            raw_aliases = [str(item) for item in js_payload.get("aliases", [])]
+            disallowed_aliases = {"react", "reactjs", "react.js", "angular", "angularjs", "angular.js", "vue", "vuejs", "vue.js"}
+            filtered_aliases = [item for item in raw_aliases if item.lower() not in disallowed_aliases]
+            if filtered_aliases != raw_aliases:
+                js_payload["aliases"] = filtered_aliases
+                changed = True
+
+        framework_defaults = {
+            "react": {
+                "name": "React",
+                "category": "framework",
+                "patterns": [r"\breact\b", r"\breact\.?js\b", r"\breactjs\b"],
+                "weight": 1.0,
+                "aliases": ["reactjs", "react.js"],
+                "description": "React framework",
+            },
+            "angular": {
+                "name": "Angular",
+                "category": "framework",
+                "patterns": [r"\bangular\b", r"\bangular\.?js\b", r"\bangularjs\b"],
+                "weight": 1.0,
+                "aliases": ["angularjs", "angular.js"],
+                "description": "Angular framework",
+            },
+            "vue": {
+                "name": "Vue",
+                "category": "framework",
+                "patterns": [r"\bvue\b", r"\bvue\.?js\b", r"\bvuejs\b"],
+                "weight": 1.0,
+                "aliases": ["vuejs", "vue.js"],
+                "description": "Vue framework",
+            },
+        }
+        for tech_id, payload in framework_defaults.items():
+            if tech_id not in self.patterns:
+                self.patterns[tech_id] = payload
+                changed = True
+
+        if "framework" not in self.categories:
+            self.categories.add("framework")
+            changed = True
+
+        if changed:
+            logger.info("Normalized technology patterns schema", count=len(self.patterns))
+
+        return changed
     
     def _build_aliases(self):
         """Построение словаря алиасов"""

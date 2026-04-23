@@ -120,6 +120,7 @@ async def websocket_analyze(websocket: WebSocket):
             backend_url,
             ping_interval=settings.websocket_ping_interval,
             ping_timeout=settings.websocket_ping_timeout,
+            max_size=(settings.websocket_proxy_max_message_size if settings.websocket_proxy_max_message_size > 0 else None),
         ) as backend_ws:
             await backend_ws.send(json.dumps(payload, ensure_ascii=False))
 

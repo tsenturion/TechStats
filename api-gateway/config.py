@@ -29,6 +29,7 @@ class Settings(BaseSettings):
     # WebSocket
     websocket_ping_interval: int = 20
     websocket_ping_timeout: int = 30
+    websocket_proxy_max_message_size: int = 32 * 1024 * 1024
     
     # Timeouts
     request_timeout: int = 30

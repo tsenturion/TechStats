@@ -13,7 +13,8 @@ logger = structlog.get_logger()
 class CacheManager:
     """Менеджер кэширования для результатов анализа"""
 
-    ANALYSIS_CACHE_SCHEMA_VERSION = "v5"
+    # Bump cache schema after technology-pattern split (javascript vs angular/vue/react)
+    ANALYSIS_CACHE_SCHEMA_VERSION = "v6"
     
     def __init__(self):
         self.redis_client: Optional[redis.Redis] = None

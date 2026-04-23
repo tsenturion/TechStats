@@ -47,6 +47,8 @@ const withoutTechSort = reactive({
   key: 'title',
   direction: 'asc',
 })
+const copyLinksStatus = ref('idle')
+let copyLinksStatusTimer = null
 
 const messages = {
   ru: {
@@ -77,6 +79,12 @@ const messages = {
     textMatches: 'Совпадения в тексте',
     keySkillsMatches: 'Совпадения в "Ключевые навыки"',
     sortHint: 'Нажмите по заголовку колонки для сортировки',
+    withTechDuplicates: 'одинаковых',
+    copyLinksWithDuplicates: 'Скопировать с одинаковыми',
+    copyLinksUnique: 'Скопировать уникальные',
+    copiedWithDuplicates: 'Скопировано с одинаковыми',
+    copiedUnique: 'Скопировано уникальное',
+    copyFailed: 'Не удалось скопировать',
     title: 'Название',
     id: 'ID',
     url: 'URL',
@@ -123,6 +131,12 @@ const messages = {
     textMatches: 'Text matches',
     keySkillsMatches: 'Key skills matches',
     sortHint: 'Click column header to sort',
+    withTechDuplicates: 'duplicates',
+    copyLinksWithDuplicates: 'Copy with duplicates',
+    copyLinksUnique: 'Copy unique',
+    copiedWithDuplicates: 'Copied with duplicates',
+    copiedUnique: 'Copied unique set',
+    copyFailed: 'Failed to copy',
     title: 'Title',
     id: 'ID',
     url: 'URL',
@@ -205,6 +219,26 @@ const hasKpi = computed(() => technologySharePercent.value !== null || (techVaca
 const withTechVacancies = computed(() => {
   const list = resultPayload.value?.vacancies_with_tech
   return Array.isArray(list) ? list : []
+})
+const withTechDuplicateVacanciesCount = computed(() =>
+  withTechVacancies.value.reduce((count, item) => count + (item?.is_duplicate ? 1 : 0), 0),
+)
+const uniqueWithTechVacanciesForCopy = computed(() => {
+  const uniqueRows = []
+  const seenKeys = new Set()
+
+  for (const item of withTechVacancies.value) {
+    const explicitGroupKey = String(item?.duplicate_group_key || '').trim()
+    const fallbackId = String(item?.id || '').trim()
+    const groupingKey = explicitGroupKey || (fallbackId ? `id:${fallbackId}` : normalizeVacancyUrlForCopy(item))
+    if (!groupingKey || seenKeys.has(groupingKey)) {
+      continue
+    }
+    seenKeys.add(groupingKey)
+    uniqueRows.push(item)
+  }
+
+  return uniqueRows
 })
 const sortedWithTechVacancies = computed(() => {
   const rows = [...withTechVacancies.value]
@@ -307,6 +341,82 @@ function vacancyLinkText(item) {
 
 function vacancyTitleOnly(item) {
   return String(item?.name || t('noVacancyName')).trim()
+}
+
+function normalizeVacancyUrlForCopy(item) {
+  const rawUrl = String(item?.url || '').trim()
+  const matchByUrl = rawUrl.match(/\/vacancy\/(\d+)/i)
+  if (matchByUrl?.[1]) {
+    return `https://hh.ru/vacancy/${matchByUrl[1]}`
+  }
+
+  const id = String(item?.id || '').trim()
+  if (id) {
+    return `https://hh.ru/vacancy/${id}`
+  }
+
+  return rawUrl
+}
+
+function setCopyLinksStatus(status) {
+  copyLinksStatus.value = status
+  if (copyLinksStatusTimer) {
+    clearTimeout(copyLinksStatusTimer)
+  }
+  copyLinksStatusTimer = setTimeout(() => {
+    copyLinksStatus.value = 'idle'
+    copyLinksStatusTimer = null
+  }, 2000)
+}
+
+function copyStatusText() {
+  if (copyLinksStatus.value === 'all_copied') {
+    return t('copiedWithDuplicates')
+  }
+  if (copyLinksStatus.value === 'unique_copied') {
+    return t('copiedUnique')
+  }
+  return t('copyFailed')
+}
+
+function fallbackCopyToClipboard(text) {
+  const textarea = document.createElement('textarea')
+  textarea.value = text
+  textarea.setAttribute('readonly', '')
+  textarea.style.position = 'absolute'
+  textarea.style.left = '-9999px'
+  document.body.appendChild(textarea)
+  textarea.select()
+  const copied = document.execCommand('copy')
+  document.body.removeChild(textarea)
+  return copied
+}
+
+async function copyWithTechnologyLinks(mode = 'all') {
+  const sourceRows = mode === 'unique' ? uniqueWithTechVacanciesForCopy.value : withTechVacancies.value
+  const links = sourceRows
+    .map((item) => normalizeVacancyUrlForCopy(item))
+    .filter((url) => Boolean(url))
+
+  if (!links.length) {
+    setCopyLinksStatus('error')
+    return
+  }
+
+  const payload = links.join('\n')
+
+  try {
+    if (navigator?.clipboard?.writeText) {
+      await navigator.clipboard.writeText(payload)
+      setCopyLinksStatus(mode === 'unique' ? 'unique_copied' : 'all_copied')
+      return
+    }
+  } catch {
+    // fallback below
+  }
+
+  const copied = fallbackCopyToClipboard(payload)
+  setCopyLinksStatus(copied ? (mode === 'unique' ? 'unique_copied' : 'all_copied') : 'error')
 }
 
 function resetOutput() {
@@ -485,7 +595,26 @@ async function loadAllVacancies(paramsSnapshot) {
   }
 }
 
-function handleStreamMessage(payload) {
+async function loadSessionResult(sessionIdValue) {
+  const normalizedSessionId = String(sessionIdValue || '').trim()
+  if (!normalizedSessionId) {
+    return null
+  }
+
+  try {
+    const response = await apiRequest('websocket', `/api/v1/ws/sessions/${encodeURIComponent(normalizedSessionId)}`)
+    const sessionPayload = response?.data
+    if (sessionPayload && typeof sessionPayload === 'object' && sessionPayload.result && typeof sessionPayload.result === 'object') {
+      return sessionPayload.result
+    }
+  } catch {
+    return null
+  }
+
+  return null
+}
+
+async function handleStreamMessage(payload) {
   latestPayload.value = payload
   pushTimeline(payload)
   hasReceivedStreamFrame.value = true
@@ -509,7 +638,20 @@ function handleStreamMessage(payload) {
 
   if (stage === 'completed') {
     streamState.value = 'completed'
-    finalResult.value = payload.metadata?.result || payload.result || latestPayload.value
+    let resolvedResult = payload.metadata?.result || payload.result || null
+    const shouldLoadSessionResult =
+      Boolean(payload?.metadata?.session_result_available) ||
+      Boolean(payload?.metadata?.result_truncated)
+    const resolvedSessionId = String(payload?.session_id || sessionId.value || '').trim()
+
+    if (shouldLoadSessionResult && resolvedSessionId) {
+      const sessionResult = await loadSessionResult(resolvedSessionId)
+      if (sessionResult) {
+        resolvedResult = sessionResult
+      }
+    }
+
+    finalResult.value = resolvedResult || latestPayload.value
     if (!Array.isArray(finalResult.value?.vacancies_without_tech)) {
       void loadAllVacancies(lastRunParams.value)
     }
@@ -564,6 +706,10 @@ async function runSyncAnalysis() {
 }
 
 onBeforeUnmount(() => {
+  if (copyLinksStatusTimer) {
+    clearTimeout(copyLinksStatusTimer)
+    copyLinksStatusTimer = null
+  }
   closeWebsocket()
 })
 
@@ -612,7 +758,7 @@ watch(wsData, (frame) => {
   if (!frame) return
   try {
     const payload = JSON.parse(frame)
-    handleStreamMessage(payload)
+    void handleStreamMessage(payload)
   } catch {
     requestError.value = t('invalidWsFrame')
     streamState.value = 'error'
@@ -655,7 +801,7 @@ onMounted(async () => {
         </label>
         <label class="text-sm">
           <span class="mb-1 block text-slate-700">{{ t('maxPages') }}</span>
-          <input v-model.number="form.max_pages" type="number" min="1" max="20" class="form-input" />
+          <input v-model.number="form.max_pages" type="number" min="1" max="100" class="form-input" />
         </label>
         <label class="text-sm">
           <span class="mb-1 block text-slate-700">{{ t('perPage') }}</span>
@@ -736,7 +882,22 @@ onMounted(async () => {
     </section>
 
     <section v-if="hasResult && withTechVacancies.length" class="panel p-4">
-      <h3 class="panel-title text-base">{{ t('withTechnology') }} ({{ withTechVacancies.length }})</h3>
+      <div class="flex flex-wrap items-center justify-between gap-2">
+        <h3 class="panel-title text-base">
+          {{ t('withTechnology') }} ({{ withTechVacancies.length }}, {{ withTechDuplicateVacanciesCount }} {{ t('withTechDuplicates') }})
+        </h3>
+        <div class="flex items-center gap-2">
+          <button class="btn-secondary" @click="copyWithTechnologyLinks('all')">{{ t('copyLinksWithDuplicates') }}</button>
+          <button class="btn-secondary" @click="copyWithTechnologyLinks('unique')">{{ t('copyLinksUnique') }}</button>
+          <span
+            v-if="copyLinksStatus !== 'idle'"
+            class="text-xs"
+            :class="copyLinksStatus === 'error' ? 'text-rose-700' : 'text-emerald-700'"
+          >
+            {{ copyStatusText() }}
+          </span>
+        </div>
+      </div>
       <p class="mt-1 text-xs text-slate-500">{{ t('sortHint') }}</p>
       <div class="table-shell mt-3">
         <table>

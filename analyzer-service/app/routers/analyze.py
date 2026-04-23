@@ -1,9 +1,11 @@
 # C:\Users\user\Desktop\TechStats\analyzer-service\app\routers\analyze.py
 import asyncio
+import hashlib
 import html
 import re
 import time
 from collections import deque
+from datetime import datetime, timedelta, timezone
 from typing import Dict, Any, List, Tuple, Optional, Callable, Awaitable
 from uuid import uuid4
 import httpx
@@ -26,6 +28,9 @@ logger = structlog.get_logger()
 # Хранилище для фоновых задач
 analysis_tasks: Dict[str, Dict[str, Any]] = {}
 RETRYABLE_STATUS_CODES = {408, 425, 429, 500, 502, 503, 504}
+HH_DATE_SHARD_START_UTC = datetime(2000, 1, 1, tzinfo=timezone.utc)
+HH_DATE_SHARD_MIN_WINDOW_SECONDS = 2
+VACANCY_FETCH_CACHE_SCHEMA_VERSION = "v1"
 
 
 async def _emit_progress(
@@ -184,6 +189,11 @@ def _build_duplicate_signature(vacancy: Dict[str, Any]) -> Tuple[str, str, str]:
     return employer_name, vacancy_name, vacancy_description
 
 
+def _build_duplicate_group_key(signature: Tuple[str, str, str]) -> str:
+    payload = "||".join(signature)
+    return hashlib.sha1(payload.encode("utf-8")).hexdigest()[:16]
+
+
 def _calculate_duplicate_metrics(vacancies: List[Dict[str, Any]]) -> Dict[str, Any]:
     grouped_ids: Dict[Tuple[str, str, str], List[str]] = {}
     ordered_ids: List[str] = []
@@ -210,10 +220,15 @@ def _calculate_duplicate_metrics(vacancies: List[Dict[str, Any]]) -> Dict[str, A
             seen_ids.add(vacancy_id)
 
     duplicate_group_size_by_id = {}
-    for ids in duplicate_groups:
+    duplicate_group_key_by_id = {}
+    for signature, ids in grouped_ids.items():
+        if len(ids) <= 1:
+            continue
+        group_key = _build_duplicate_group_key(signature)
         group_size = len(ids)
         for vacancy_id in ids:
             duplicate_group_size_by_id[vacancy_id] = group_size
+            duplicate_group_key_by_id[vacancy_id] = group_key
 
     duplicate_vacancies_count = len(duplicate_vacancy_ids)
     duplicate_extra_count = sum(max(0, len(ids) - 1) for ids in duplicate_groups)
@@ -225,6 +240,7 @@ def _calculate_duplicate_metrics(vacancies: List[Dict[str, Any]]) -> Dict[str, A
         "duplicate_vacancy_ids": duplicate_vacancy_ids,
         "duplicate_id_set": set(duplicate_id_set),
         "duplicate_group_size_by_id": duplicate_group_size_by_id,
+        "duplicate_group_key_by_id": duplicate_group_key_by_id,
     }
 
 
@@ -250,29 +266,159 @@ async def get_vacancy_client(request: Request) -> httpx.AsyncClient:
     return request.app.state.vacancy_client
 
 
-async def _fetch_vacancy_ids(
+def _utc_now_for_sharding() -> datetime:
+    now = datetime.now(timezone.utc)
+    # Stable day bucket improves cache reuse between repeated runs.
+    return datetime(now.year, now.month, now.day, 23, 59, 59, tzinfo=timezone.utc)
+
+
+def _format_hh_datetime(value: datetime) -> str:
+    normalized = value.astimezone(timezone.utc).replace(microsecond=0)
+    return normalized.isoformat().replace("+00:00", "Z")
+
+
+def _safe_positive_int(value: Any, default: int = 1) -> int:
+    try:
+        parsed = int(value)
+        if parsed > 0:
+            return parsed
+    except Exception:
+        pass
+    return max(1, int(default))
+
+
+def _safe_non_negative_int(value: Any, default: int = 0) -> int:
+    try:
+        parsed = int(value)
+        if parsed >= 0:
+            return parsed
+    except Exception:
+        pass
+    return max(0, int(default))
+
+
+def _minify_search_item_for_cache(item: Dict[str, Any]) -> Dict[str, Any]:
+    return {
+        "id": item.get("id"),
+        "name": item.get("name"),
+        "alternate_url": item.get("alternate_url"),
+        "url": item.get("url"),
+        "snippet": item.get("snippet") if isinstance(item.get("snippet"), dict) else {},
+        "description": item.get("description"),
+        "key_skills": item.get("key_skills"),
+        "employer": item.get("employer") if isinstance(item.get("employer"), dict) else {},
+    }
+
+
+def _build_vacancy_fetch_cache_key(
+    search_query: str,
+    area: int,
+    per_page: int,
+    exact_search: bool,
+    max_pages: int,
+    shard_end_utc: datetime,
+) -> str:
+    payload = "|".join(
+        [
+            VACANCY_FETCH_CACHE_SCHEMA_VERSION,
+            str(search_query),
+            str(area),
+            str(per_page),
+            str(max_pages),
+            str(bool(exact_search)),
+            shard_end_utc.date().isoformat(),
+        ]
+    )
+    payload_hash = hashlib.sha1(payload.encode("utf-8")).hexdigest()[:24]
+    return f"vacancy_fetch:{VACANCY_FETCH_CACHE_SCHEMA_VERSION}:{payload_hash}"
+
+
+def _is_valid_cached_vacancy_fetch_payload(payload: Any) -> bool:
+    if not isinstance(payload, dict):
+        return False
+
+    ids = payload.get("ids")
+    items_by_id = payload.get("items_by_id")
+    if not isinstance(ids, list):
+        return False
+    if not isinstance(items_by_id, dict):
+        return False
+    for vacancy_id in ids:
+        if not isinstance(vacancy_id, str):
+            return False
+    return True
+
+
+def _split_hh_datetime_range(
+    start_utc: datetime,
+    end_utc: datetime,
+) -> Optional[Tuple[Tuple[datetime, datetime], Tuple[datetime, datetime]]]:
+    total_seconds = int((end_utc - start_utc).total_seconds())
+    if total_seconds < HH_DATE_SHARD_MIN_WINDOW_SECONDS:
+        return None
+
+    mid = start_utc + timedelta(seconds=total_seconds // 2)
+    right_start = mid + timedelta(seconds=1)
+    if right_start > end_utc:
+        return None
+    return (start_utc, mid), (right_start, end_utc)
+
+
+def _build_vacancy_search_params(
+    search_query: str,
+    area: int,
+    page: int,
+    per_page: int,
+    exact_search: bool,
+    use_cache: bool,
+    date_from_utc: Optional[datetime] = None,
+    date_to_utc: Optional[datetime] = None,
+) -> Dict[str, Any]:
+    params: Dict[str, Any] = {
+        "query": search_query,
+        "area": area,
+        "page": page,
+        "per_page": per_page,
+        "search_field": "name",
+        "exact_search": exact_search,
+        "use_cache": use_cache,
+    }
+    if date_from_utc is not None:
+        params["date_from"] = _format_hh_datetime(date_from_utc)
+    if date_to_utc is not None:
+        params["date_to"] = _format_hh_datetime(date_to_utc)
+    return params
+
+
+async def _fetch_vacancy_search_interval(
     vacancy_client: httpx.AsyncClient,
     search_query: str,
     area: int,
     per_page: int,
     exact_search: bool,
     use_cache: bool,
-    max_pages: int,
-):
-    all_items = []
+    pages_limit: int,
+    date_from_utc: Optional[datetime] = None,
+    date_to_utc: Optional[datetime] = None,
+    split_if_overflow_below_slots: Optional[int] = None,
+) -> Dict[str, Any]:
+    safe_pages_limit = _safe_positive_int(pages_limit, default=1)
+    request_params = _build_vacancy_search_params(
+        search_query=search_query,
+        area=area,
+        page=0,
+        per_page=per_page,
+        exact_search=exact_search,
+        use_cache=use_cache,
+        date_from_utc=date_from_utc,
+        date_to_utc=date_to_utc,
+    )
+
     first_response = await _request_vacancy_service_with_retry(
         vacancy_client=vacancy_client,
         method="GET",
         path="/api/v1/search",
-        params={
-            "query": search_query,
-            "area": area,
-            "page": 0,
-            "per_page": per_page,
-            "search_field": "name",
-            "exact_search": exact_search,
-            "use_cache": use_cache,
-        },
+        params=request_params,
     )
     if first_response.status_code != 200:
         raise HTTPException(
@@ -281,12 +427,27 @@ async def _fetch_vacancy_ids(
         )
 
     first_data = first_response.json()
-    all_items.extend(first_data.get("items", []))
-    total_pages = min(max_pages, int(first_data.get("pages", 1)))
+    first_items_raw = first_data.get("items", [])
+    first_items = first_items_raw if isinstance(first_items_raw, list) else []
+    all_items: List[Dict[str, Any]] = [item for item in first_items if isinstance(item, dict)]
+    total_pages_available = _safe_positive_int(first_data.get("pages", 1), default=1)
+    found_total = max(
+        len(all_items),
+        _safe_non_negative_int(first_data.get("found", len(all_items)), default=len(all_items)),
+    )
+    retrievable_capacity = total_pages_available * max(1, int(per_page))
+    hh_overflow_detected = found_total > retrievable_capacity
+    split_probe_activated = False
+    if split_if_overflow_below_slots is not None:
+        threshold_slots = _safe_positive_int(split_if_overflow_below_slots, default=1)
+        split_probe_activated = hh_overflow_detected and retrievable_capacity < threshold_slots
 
-    if total_pages > 1:
+    pages_to_fetch = 1 if split_probe_activated else min(safe_pages_limit, total_pages_available)
+    pages_fetched = 1
+
+    if pages_to_fetch > 1:
         page_tasks: List[Tuple[int, Awaitable[httpx.Response]]] = []
-        for page in range(1, total_pages):
+        for page in range(1, pages_to_fetch):
             page_tasks.append(
                 (
                     page,
@@ -294,15 +455,16 @@ async def _fetch_vacancy_ids(
                         vacancy_client=vacancy_client,
                         method="GET",
                         path="/api/v1/search",
-                        params={
-                            "query": search_query,
-                            "area": area,
-                            "page": page,
-                            "per_page": per_page,
-                            "search_field": "name",
-                            "exact_search": exact_search,
-                            "use_cache": use_cache,
-                        },
+                        params=_build_vacancy_search_params(
+                            search_query=search_query,
+                            area=area,
+                            page=page,
+                            per_page=per_page,
+                            exact_search=exact_search,
+                            use_cache=use_cache,
+                            date_from_utc=date_from_utc,
+                            date_to_utc=date_to_utc,
+                        ),
                     ),
                 )
             )
@@ -317,30 +479,192 @@ async def _fetch_vacancy_ids(
                     "Vacancy search page request failed",
                     page=page_number,
                     query=search_query,
+                    date_from=_format_hh_datetime(date_from_utc) if date_from_utc else None,
+                    date_to=_format_hh_datetime(date_to_utc) if date_to_utc else None,
                     error=_format_exception_message(page_response),
                 )
                 continue
             if page_response.status_code == 200:
-                all_items.extend(page_response.json().get("items", []))
+                page_items_raw = page_response.json().get("items", [])
+                page_items = page_items_raw if isinstance(page_items_raw, list) else []
+                all_items.extend(item for item in page_items if isinstance(item, dict))
+                pages_fetched += 1
             else:
                 logger.warning(
                     "Vacancy search page returned non-200",
                     page=page_number,
                     query=search_query,
+                    date_from=_format_hh_datetime(date_from_utc) if date_from_utc else None,
+                    date_to=_format_hh_datetime(date_to_utc) if date_to_utc else None,
                     status_code=page_response.status_code,
                     body_preview=_truncate_text(page_response.text),
                 )
 
-    unique_ids = []
+    return {
+        "items": all_items,
+        "found_total": found_total,
+        "total_pages_available": total_pages_available,
+        "pages_fetched": pages_fetched,
+        "retrievable_capacity": retrievable_capacity,
+        "hh_overflow_detected": hh_overflow_detected,
+        "split_probe_activated": split_probe_activated,
+        "date_from": _format_hh_datetime(date_from_utc) if date_from_utc else None,
+        "date_to": _format_hh_datetime(date_to_utc) if date_to_utc else None,
+    }
+
+
+async def _fetch_vacancy_ids(
+    vacancy_client: httpx.AsyncClient,
+    search_query: str,
+    area: int,
+    per_page: int,
+    exact_search: bool,
+    use_cache: bool,
+    max_pages: int,
+    shard_end_utc: Optional[datetime] = None,
+    return_items: bool = False,
+):
+    safe_per_page = _safe_positive_int(per_page, default=50)
+    safe_max_pages = _safe_positive_int(max_pages, default=1)
+    max_items_limit = safe_per_page * safe_max_pages
+
+    unique_ids: List[str] = []
+    items_by_id: Dict[str, Dict[str, Any]] = {}
     seen = set()
-    for item in all_items:
-        vacancy_id = item.get("id")
-        if vacancy_id:
+    total_search_requests = 0
+    date_sharding_used = False
+    unresolved_overflow_ranges = 0
+    split_guard_counter = 0
+
+    pending_ranges: deque[Tuple[Optional[datetime], Optional[datetime]]] = deque([(None, None)])
+
+    while pending_ranges and len(unique_ids) < max_items_limit:
+        date_from_utc, date_to_utc = pending_ranges.popleft()
+        remaining_slots = max_items_limit - len(unique_ids)
+        pages_limit = max(1, (remaining_slots + safe_per_page - 1) // safe_per_page)
+
+        interval_result = await _fetch_vacancy_search_interval(
+            vacancy_client=vacancy_client,
+            search_query=search_query,
+            area=area,
+            per_page=safe_per_page,
+            exact_search=exact_search,
+            use_cache=use_cache,
+            pages_limit=pages_limit,
+            date_from_utc=date_from_utc,
+            date_to_utc=date_to_utc,
+            split_if_overflow_below_slots=remaining_slots,
+        )
+        total_search_requests += int(interval_result.get("pages_fetched", 1) or 1)
+
+        for item in interval_result.get("items", []):
+            if not isinstance(item, dict):
+                continue
+            vacancy_id = item.get("id")
+            if not vacancy_id:
+                continue
             normalized_id = str(vacancy_id)
             if normalized_id not in seen:
+                if len(unique_ids) >= max_items_limit:
+                    break
                 seen.add(normalized_id)
                 unique_ids.append(normalized_id)
+            if normalized_id not in items_by_id:
+                items_by_id[normalized_id] = item
+
+        remaining_slots = max_items_limit - len(unique_ids)
+        if remaining_slots <= 0:
+            break
+
+        if not interval_result.get("hh_overflow_detected"):
+            continue
+
+        interval_capacity = int(interval_result.get("retrievable_capacity", 0) or 0)
+        if interval_capacity >= remaining_slots:
+            continue
+
+        if date_from_utc is None or date_to_utc is None:
+            base_start = HH_DATE_SHARD_START_UTC
+            base_end = shard_end_utc if shard_end_utc is not None else _utc_now_for_sharding()
+        else:
+            base_start = date_from_utc
+            base_end = date_to_utc
+
+        split = _split_hh_datetime_range(base_start, base_end)
+        if split is None:
+            unresolved_overflow_ranges += 1
+            logger.warning(
+                "Vacancy search range overflow cannot be split further",
+                query=search_query,
+                date_from=_format_hh_datetime(base_start),
+                date_to=_format_hh_datetime(base_end),
+                retrievable_capacity=interval_capacity,
+                remaining_slots=remaining_slots,
+            )
+            continue
+
+        date_sharding_used = True
+        split_guard_counter += 1
+        (left_start, left_end), (right_start, right_end) = split
+        # Newer interval first, then older interval.
+        pending_ranges.appendleft((left_start, left_end))
+        pending_ranges.appendleft((right_start, right_end))
+
+        logger.info(
+            "Applying HH date-sharding for overflowed vacancy search interval",
+            query=search_query,
+            area=area,
+            per_page=safe_per_page,
+            found_total=int(interval_result.get("found_total", 0) or 0),
+            retrievable_capacity=interval_capacity,
+            split_left_from=_format_hh_datetime(left_start),
+            split_left_to=_format_hh_datetime(left_end),
+            split_right_from=_format_hh_datetime(right_start),
+            split_right_to=_format_hh_datetime(right_end),
+        )
+
+        if split_guard_counter > 2048:
+            logger.warning(
+                "Date-sharding split guard reached, stopping additional splits",
+                query=search_query,
+                split_guard_counter=split_guard_counter,
+            )
+            break
+
+    if return_items:
+        return {
+            "ids": unique_ids,
+            "items_by_id": items_by_id,
+            "search_stats": {
+                "vacancy_search_requests": total_search_requests,
+                "date_sharding_used": date_sharding_used,
+                "unresolved_overflow_ranges": unresolved_overflow_ranges,
+                "vacancy_search_cache_hit": False,
+            },
+        }
     return unique_ids
+
+
+def _build_fallback_vacancy_from_search_item(
+    vacancy_id: str,
+    search_item: Optional[Dict[str, Any]],
+) -> Dict[str, Any]:
+    item = search_item if isinstance(search_item, dict) else {}
+    snippet = item.get("snippet") if isinstance(item.get("snippet"), dict) else {}
+    requirement = str(snippet.get("requirement", "") or "")
+    responsibility = str(snippet.get("responsibility", "") or "")
+    fallback_description = " ".join(part for part in [requirement, responsibility] if part).strip()
+
+    return {
+        "id": vacancy_id,
+        "name": str(item.get("name") or f"Vacancy {vacancy_id}"),
+        "alternate_url": str(item.get("alternate_url") or item.get("url") or f"https://hh.ru/vacancy/{vacancy_id}"),
+        "snippet": snippet,
+        "description": str(item.get("description") or fallback_description),
+        "key_skills": item.get("key_skills", []),
+        "employer": item.get("employer") if isinstance(item.get("employer"), dict) else {},
+        "_details_fallback": True,
+    }
 
 
 async def _fetch_detailed_vacancies(
@@ -535,6 +859,25 @@ async def _fetch_detailed_vacancies(
 
         missing_chunk_ids = [vacancy_id for vacancy_id in chunk_ids if vacancy_id not in loaded_chunk_ids]
         if missing_chunk_ids:
+            if len(loaded_chunk_ids) == 0 and len(chunk_ids) > 1:
+                failed_chunks.append(
+                    {
+                        "vacancy_ids": [str(vacancy_id) for vacancy_id in chunk_ids],
+                        "status_code": 404,
+                        "message": "Batch response did not return vacancy details for requested IDs",
+                    }
+                )
+                for vacancy_id in chunk_ids:
+                    resolved_ids.add(str(vacancy_id))
+                logger.warning(
+                    "Batch fetch returned no vacancies for chunk, skipping recursive split",
+                    chunk_size=len(chunk_ids),
+                    missing_count=len(missing_chunk_ids),
+                    missing_preview=missing_chunk_ids[:10],
+                )
+                await _emit_fetching_progress()
+                continue
+
             logger.warning(
                 "Batch fetch returned partial data, retrying missing IDs",
                 chunk_size=len(chunk_ids),
@@ -651,6 +994,18 @@ def _is_complete_cached_result(cached_result: Dict[str, Any]) -> bool:
             return False
         if "text_match_count" not in item or "key_skills_match_count" not in item:
             return False
+        if "duplicate_group_key" not in item:
+            return False
+        if not isinstance(item.get("duplicate_group_key"), str):
+            return False
+
+    for item in without_tech:
+        if not isinstance(item, dict):
+            return False
+        if "duplicate_group_key" not in item:
+            return False
+        if not isinstance(item.get("duplicate_group_key"), str):
+            return False
 
     return len(with_tech) + len(without_tech) == total
 
@@ -710,14 +1065,79 @@ async def _perform_analysis(
         },
     )
 
-    vacancy_ids = await _fetch_vacancy_ids(
-        vacancy_client=vacancy_client,
-        search_query=search_query,
-        area=area,
-        per_page=per_page,
-        exact_search=exact_search,
-        use_cache=use_cache,
-        max_pages=max_pages,
+    shard_end_utc = _utc_now_for_sharding()
+    vacancy_fetch_result: Dict[str, Any] = {}
+    vacancy_fetch_cache_key: Optional[str] = None
+    vacancy_search_index_cache_hit = False
+
+    if use_cache:
+        vacancy_fetch_cache_key = _build_vacancy_fetch_cache_key(
+            search_query=search_query,
+            area=area,
+            per_page=per_page,
+            exact_search=exact_search,
+            max_pages=max_pages,
+            shard_end_utc=shard_end_utc,
+        )
+        cached_vacancy_fetch = await cache_manager.get(vacancy_fetch_cache_key)
+        if _is_valid_cached_vacancy_fetch_payload(cached_vacancy_fetch):
+            vacancy_fetch_result = cached_vacancy_fetch
+            vacancy_search_index_cache_hit = True
+            cached_stats = (
+                dict(vacancy_fetch_result.get("search_stats", {}))
+                if isinstance(vacancy_fetch_result.get("search_stats"), dict)
+                else {}
+            )
+            cached_stats["vacancy_search_cache_hit"] = True
+            cached_stats["vacancy_search_requests"] = 0
+            vacancy_fetch_result["search_stats"] = cached_stats
+
+    if not vacancy_fetch_result:
+        vacancy_fetch_result = await _fetch_vacancy_ids(
+            vacancy_client=vacancy_client,
+            search_query=search_query,
+            area=area,
+            per_page=per_page,
+            exact_search=exact_search,
+            use_cache=use_cache,
+            max_pages=max_pages,
+            shard_end_utc=shard_end_utc,
+            return_items=True,
+        )
+
+        if use_cache and vacancy_fetch_cache_key:
+            cached_items_by_id = {}
+            raw_items_by_id = vacancy_fetch_result.get("items_by_id", {})
+            if isinstance(raw_items_by_id, dict):
+                for vacancy_id, item in raw_items_by_id.items():
+                    normalized_id = str(vacancy_id).strip()
+                    if not normalized_id or not isinstance(item, dict):
+                        continue
+                    cached_items_by_id[normalized_id] = _minify_search_item_for_cache(item)
+
+            cached_payload = {
+                "ids": [str(vacancy_id).strip() for vacancy_id in vacancy_fetch_result.get("ids", []) if str(vacancy_id).strip()],
+                "items_by_id": cached_items_by_id,
+                "search_stats": dict(vacancy_fetch_result.get("search_stats", {}))
+                if isinstance(vacancy_fetch_result.get("search_stats"), dict)
+                else {},
+                "shard_end_date": shard_end_utc.date().isoformat(),
+            }
+            await cache_manager.set(
+                vacancy_fetch_cache_key,
+                cached_payload,
+                ttl=settings.analysis_cache_ttl_hours * 3600,
+            )
+
+    vacancy_ids = list(vacancy_fetch_result.get("ids", []))
+    search_items_by_id = vacancy_fetch_result.get("items_by_id", {})
+    vacancy_search_stats = (
+        dict(vacancy_fetch_result.get("search_stats", {}))
+        if isinstance(vacancy_fetch_result.get("search_stats"), dict)
+        else {}
+    )
+    vacancy_search_stats["vacancy_search_cache_hit"] = vacancy_search_index_cache_hit or bool(
+        vacancy_search_stats.get("vacancy_search_cache_hit")
     )
 
     await _emit_progress(
@@ -824,6 +1244,21 @@ async def _perform_analysis(
         chunk_hard_timeout_sec=detail_chunk_hard_timeout_sec,
     )
     detailed_vacancies = details_result.get("vacancies", [])
+    missing_details_ids = [str(vacancy_id) for vacancy_id in details_result.get("missing_ids", [])]
+    fallback_stub_ids: List[str] = []
+    if missing_details_ids:
+        fallback_vacancies = [
+            _build_fallback_vacancy_from_search_item(vacancy_id, search_items_by_id.get(vacancy_id))
+            for vacancy_id in missing_details_ids
+        ]
+        detailed_vacancies.extend(fallback_vacancies)
+        fallback_stub_ids = [str(item.get("id")) for item in fallback_vacancies if item.get("id")]
+        details_result["fallback_stub_ids"] = fallback_stub_ids
+        logger.warning(
+            "Detailed vacancy payload missing for part of IDs, using search-item fallback",
+            missing_count=len(missing_details_ids),
+            fallback_count=len(fallback_stub_ids),
+        )
     detailed_total = len(detailed_vacancies)
     await _emit_progress(
         progress_callback,
@@ -930,6 +1365,7 @@ async def _perform_analysis(
     duplicate_metrics = _calculate_duplicate_metrics(processed_detailed_vacancies)
     duplicate_id_set = duplicate_metrics["duplicate_id_set"]
     duplicate_group_size_by_id = duplicate_metrics["duplicate_group_size_by_id"]
+    duplicate_group_key_by_id = duplicate_metrics["duplicate_group_key_by_id"]
 
     vacancies_with_tech = []
     vacancies_without_tech = []
@@ -937,6 +1373,11 @@ async def _perform_analysis(
         vacancy_id = str(result.get("vacancy_id", "")).strip()
         is_duplicate = vacancy_id in duplicate_id_set
         duplicate_group_size = int(duplicate_group_size_by_id.get(vacancy_id, 1))
+        duplicate_group_key = (
+            str(duplicate_group_key_by_id.get(vacancy_id, "")).strip()
+            if is_duplicate
+            else ""
+        )
 
         text_match_count = int(result.get("text_match_count", result.get("match_count", 0)) or 0)
         key_skills_match_count = int(result.get("key_skills_match_count", 0) or 0)
@@ -953,6 +1394,7 @@ async def _perform_analysis(
                     "key_skills_match_count": key_skills_match_count,
                     "is_duplicate": is_duplicate,
                     "duplicate_group_size": duplicate_group_size,
+                    "duplicate_group_key": duplicate_group_key,
                 }
             )
         else:
@@ -966,13 +1408,15 @@ async def _perform_analysis(
                     "key_skills_match_count": 0,
                     "is_duplicate": is_duplicate,
                     "duplicate_group_size": duplicate_group_size,
+                    "duplicate_group_key": duplicate_group_key,
                 }
             )
 
     total_vacancies = len(ordered_results)
     tech_vacancies = len(vacancies_with_tech)
     tech_percentage = (tech_vacancies / total_vacancies * 100) if total_vacancies else 0
-    real_requests = min(max_pages, 1 + max_pages) + 1
+    vacancy_search_requests = _safe_non_negative_int(vacancy_search_stats.get("vacancy_search_requests", 0), default=0)
+    real_requests = vacancy_search_requests + 1
     cached_requests = sum(1 for vacancy_id in processed_vacancy_ids if cached_analyses.get(vacancy_id))
     total_requests = real_requests + max(0, cached_requests)
     cache_hit_rate = (cached_requests / total_requests * 100) if total_requests else 0
@@ -1000,6 +1444,9 @@ async def _perform_analysis(
             "detail_fetch_cache_stats": details_result.get("cache_stats", {}),
             "detail_fetch_missing_ids": details_result.get("missing_ids", []),
             "detail_fetch_failed_chunks": details_result.get("failed_chunks", []),
+            "detail_fetch_fallback_stub_ids": details_result.get("fallback_stub_ids", []),
+            "vacancy_search_stats": vacancy_search_stats,
+            "vacancy_search_index_cache_hit": bool(vacancy_search_stats.get("vacancy_search_cache_hit")),
         },
         "request_stats": {
             "real_requests": real_requests,

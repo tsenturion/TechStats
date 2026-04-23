@@ -1,8 +1,10 @@
 import time
 
+import httpx
 import pytest
 
-from app.hh_client import HHClient
+from config import settings
+from app.hh_client import HHClient, HHVacancySearchForbiddenError
 
 
 class DummyResponse:
@@ -34,6 +36,7 @@ async def test_search_vacancies_builds_expected_params(monkeypatch):
     assert captured["params"]["page"] == 1
     assert captured["params"]["per_page"] == 20
     assert captured["params"]["search_field"] == "name"
+    assert captured["params"]["host"] == settings.hh_api_host
 
 
 @pytest.mark.asyncio
@@ -61,6 +64,61 @@ async def test_search_vacancies_omits_search_field_when_not_provided(monkeypatch
     assert captured["endpoint"] == "/vacancies"
     assert captured["params"]["text"] == "chemistry"
     assert "search_field" not in captured["params"]
+    assert captured["params"]["host"] == settings.hh_api_host
+
+
+@pytest.mark.asyncio
+async def test_search_vacancies_passes_date_range_filters(monkeypatch):
+    client = HHClient()
+    captured = {}
+
+    async def fake_make_request(method, endpoint, params=None, json_data=None):
+        captured["method"] = method
+        captured["endpoint"] = endpoint
+        captured["params"] = params
+        return DummyResponse({"items": [], "found": 0, "pages": 0})
+
+    monkeypatch.setattr(client, "make_request", fake_make_request)
+
+    await client.search_vacancies(
+        query="Python",
+        area=113,
+        page=0,
+        per_page=50,
+        search_field="name",
+        date_from="2026-03-01T00:00:00Z",
+        date_to="2026-03-10T23:59:59Z",
+    )
+
+    assert captured["method"] == "GET"
+    assert captured["endpoint"] == "/vacancies"
+    assert captured["params"]["date_from"] == "2026-03-01T00:00:00Z"
+    assert captured["params"]["date_to"] == "2026-03-10T23:59:59Z"
+    assert captured["params"]["host"] == settings.hh_api_host
+
+
+@pytest.mark.asyncio
+async def test_make_request_maps_vacancies_403_to_domain_error(monkeypatch):
+    client = HHClient()
+
+    async def fake_rate_limit():
+        return None
+
+    class FakeHTTPClient:
+        async def request(self, method, url, params=None, json=None):  # noqa: A002
+            request = httpx.Request(method, f"https://api.hh.ru{url}", params=params)
+            return httpx.Response(
+                403,
+                request=request,
+                headers={"server": "ddos-guard", "x-request-id": "req-123"},
+                json={"errors": [{"type": "forbidden"}]},
+            )
+
+    monkeypatch.setattr(client, "_rate_limit", fake_rate_limit)
+    client.client = FakeHTTPClient()
+
+    with pytest.raises(HHVacancySearchForbiddenError):
+        await client.make_request("GET", "/vacancies", params={"text": "devops"})
 
 
 @pytest.mark.asyncio

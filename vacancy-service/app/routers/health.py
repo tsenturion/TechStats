@@ -41,6 +41,7 @@ async def health_check():
         probe_url = f"{settings.hh_api_base_url}{probe_path}"
         probe_headers = {
             "User-Agent": settings.hh_api_user_agent,
+            "HH-User-Agent": settings.hh_api_user_agent,
             "Accept": "application/json",
             "Accept-Charset": "utf-8",
         }
@@ -113,9 +114,19 @@ async def detailed_health_check():
     endpoints_to_check = ["/vacancies", "/areas", "/industries", "/professional_roles"]
     endpoint_health = {}
     async with httpx.AsyncClient(timeout=5.0) as client:
+        probe_headers = {
+            "User-Agent": settings.hh_api_user_agent,
+            "HH-User-Agent": settings.hh_api_user_agent,
+            "Accept": "application/json",
+            "Accept-Charset": "utf-8",
+        }
         for endpoint in endpoints_to_check:
             try:
-                response = await client.get(f"{settings.hh_api_base_url}{endpoint}")
+                response = await client.get(
+                    f"{settings.hh_api_base_url}{endpoint}",
+                    headers=probe_headers,
+                    params={"host": settings.hh_api_host},
+                )
                 endpoint_health[endpoint] = {
                     "status": "healthy" if response.status_code == 200 else "unhealthy",
                     "status_code": response.status_code,

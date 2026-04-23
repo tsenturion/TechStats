@@ -99,8 +99,11 @@ class TextAnalyzer:
             nltk.data.find('tokenizers/punkt')
             nltk.data.find('corpora/stopwords')
         except LookupError:
-            # Загружаем в фоновом режиме
-            await asyncio.to_thread(self._download_nltk_sync)
+            # Не блокируем startup: пробуем скачать с коротким таймаутом.
+            try:
+                await asyncio.wait_for(asyncio.to_thread(self._download_nltk_sync), timeout=5.0)
+            except Exception as exc:
+                logger.warning("NLTK data download skipped, fallback tokenization will be used", error=str(exc))
         
         self.nltk_downloaded = True
     

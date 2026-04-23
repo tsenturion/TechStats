@@ -18,6 +18,7 @@ from app.routers.vacancies import (
     get_rate_limiter,
     router as vacancies_router,
 )
+from app.hh_client import HHVacancySearchForbiddenError
 
 
 class FakeRateLimiter:
@@ -217,6 +218,43 @@ def test_search_non_exact_name_uses_dedicated_cache_field(monkeypatch):
     assert captured["search_field"] == "default_title_contains"
 
 
+def test_search_forwards_date_filters_and_scopes_cache_key(monkeypatch):
+    captured = {}
+
+    async def fake_cache_search(query, area, page, per_page, search_field):
+        captured["cache_search_field"] = search_field
+        return None
+
+    async def fake_cache_store(query, area, page, per_page, search_field, results):
+        captured["cache_store_field"] = search_field
+        return True
+
+    monkeypatch.setattr(vacancies_module.cache_manager, "search_vacancies_cache", fake_cache_search)
+    monkeypatch.setattr(vacancies_module.cache_manager, "cache_search_results", fake_cache_store)
+
+    app, hh_client, _ = _build_app()
+    client = TestClient(app)
+    response = client.get(
+        "/api/v1/search",
+        params={
+            "query": "Python",
+            "date_from": "2026-03-01T00:00:00Z",
+            "date_to": "2026-03-10T23:59:59Z",
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert hh_client.search_calls
+    assert hh_client.search_calls[0]["date_from"] == "2026-03-01T00:00:00Z"
+    assert hh_client.search_calls[0]["date_to"] == "2026-03-10T23:59:59Z"
+    assert "date_from:2026-03-01T00:00:00Z" in captured["cache_search_field"]
+    assert "date_to:2026-03-10T23:59:59Z" in captured["cache_search_field"]
+    assert captured["cache_store_field"] == captured["cache_search_field"]
+    assert payload["search_params"]["date_from"] == "2026-03-01T00:00:00Z"
+    assert payload["search_params"]["date_to"] == "2026-03-10T23:59:59Z"
+
+
 def test_search_rate_limited(monkeypatch):
     async def fake_cache_search(*args, **kwargs):
         return None
@@ -226,6 +264,38 @@ def test_search_rate_limited(monkeypatch):
     client = TestClient(app)
     response = client.get("/api/v1/search", params={"query": "Python"})
     assert response.status_code == 429
+
+
+def test_search_maps_hh_forbidden_to_service_unavailable(monkeypatch):
+    async def fake_cache_search(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr(vacancies_module.cache_manager, "search_vacancies_cache", fake_cache_search)
+
+    class ForbiddenHHClient(FakeHHClient):
+        async def search_vacancies(self, **kwargs):
+            raise HHVacancySearchForbiddenError("forbidden by anti-bot")
+
+    app, _, _ = _build_app(hh_client=ForbiddenHHClient())
+    client = TestClient(app)
+    response = client.get("/api/v1/search", params={"query": "devops"})
+    assert response.status_code == 503
+    assert "captcha/anti-bot" in response.json()["detail"]
+
+
+def test_search_keeps_high_page_index_up_to_hh_safe_bound(monkeypatch):
+    async def fake_cache_search(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr(vacancies_module.cache_manager, "search_vacancies_cache", fake_cache_search)
+
+    app, hh_client, _ = _build_app()
+    client = TestClient(app)
+    response = client.get("/api/v1/search", params={"query": "Python", "page": 90, "per_page": 50, "exact_search": True})
+
+    assert response.status_code == 200
+    assert hh_client.search_calls
+    assert hh_client.search_calls[0]["page"] == 90
 
 
 def test_get_vacancy_cache_hit(monkeypatch):

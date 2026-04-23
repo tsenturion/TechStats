@@ -5,13 +5,16 @@ from typing import Dict, Any, List, Optional
 import httpx
 import structlog
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
-import backoff
 
 from config import settings
 from app.rate_limiter import RateLimiter
 from shared.http_client import build_async_client
 
 logger = structlog.get_logger()
+
+
+class HHVacancySearchForbiddenError(RuntimeError):
+    """HH API vacancy-search request was blocked by captcha/anti-bot protection."""
 
 
 class HHClient:
@@ -25,14 +28,19 @@ class HHClient:
         
     async def initialize(self):
         """Инициализация клиента"""
+        headers = {
+            "User-Agent": settings.hh_api_user_agent,
+            "HH-User-Agent": settings.hh_api_user_agent,
+            "Accept": "application/json",
+            "Accept-Charset": "utf-8"
+        }
+        if settings.hh_api_access_token:
+            headers["Authorization"] = f"Bearer {settings.hh_api_access_token}"
+
         self.client = build_async_client(
             base_url=settings.hh_api_base_url,
             timeout=settings.hh_api_timeout,
-            headers={
-                "User-Agent": settings.hh_api_user_agent,
-                "Accept": "application/json",
-                "Accept-Charset": "utf-8"
-            },
+            headers=headers,
             retries=settings.max_retries,
             backoff_factor=0.4,
         )
@@ -62,12 +70,6 @@ class HHClient:
         retry=retry_if_exception_type((httpx.TimeoutException, httpx.NetworkError)),
         reraise=True
     )
-    @backoff.on_exception(
-        backoff.expo,
-        (httpx.HTTPStatusError, httpx.RequestError),
-        max_tries=settings.max_retries,
-        max_time=30
-    )
     async def make_request(
         self,
         method: str,
@@ -80,12 +82,15 @@ class HHClient:
         
         url = endpoint if endpoint.startswith("/") else f"/{endpoint}"
         full_url = f"{settings.hh_api_base_url}{url}"
+        request_params = dict(params or {})
+        if settings.hh_api_host and "host" not in request_params:
+            request_params["host"] = settings.hh_api_host
 
         try:
             response = await self.client.request(
                 method=method,
                 url=url,
-                params=params,
+                params=request_params,
                 json=json_data
             )
             
@@ -95,7 +100,7 @@ class HHClient:
                 method=method,
                 url=full_url,
                 status_code=response.status_code,
-                params=params
+                params=request_params
             )
             
             response.raise_for_status()
@@ -109,15 +114,31 @@ class HHClient:
                 "HH API error",
                 url=full_url,
                 status_code=e.response.status_code,
-                error=str(e)
+                error=str(e),
+                params=request_params,
             )
             
             # Обработка специфичных ошибок HH
             if e.response.status_code == 429:
                 logger.warning("HH API rate limit exceeded")
-                await asyncio.sleep(10)  # Ждем 10 секунд при rate limit
             elif e.response.status_code == 403:
-                logger.warning("HH API access forbidden")
+                logger.warning(
+                    "HH API access forbidden",
+                    server=e.response.headers.get("server"),
+                    request_id=e.response.headers.get("x-request-id"),
+                )
+                if method.upper() == "GET" and url == "/vacancies":
+                    body_preview = (e.response.text or "").strip()
+                    if len(body_preview) > 400:
+                        body_preview = f"{body_preview[:400]}..."
+                    server_name = str(e.response.headers.get("server", "") or "").strip()
+                    request_id = str(e.response.headers.get("x-request-id", "") or "").strip()
+                    raise HHVacancySearchForbiddenError(
+                        "HH API blocked vacancy search with HTTP 403 "
+                        "(captcha/anti-bot protection). "
+                        f"server={server_name or 'unknown'}, request_id={request_id or 'unknown'}, "
+                        f"response={body_preview or '<empty>'}"
+                    ) from e
             elif e.response.status_code == 404:
                 logger.info("HH API resource not found", url=full_url)
                 
@@ -133,7 +154,9 @@ class HHClient:
         page: int = 0,
         per_page: int = 100,
         search_field: Optional[str] = "name",
-        only_with_salary: bool = False
+        only_with_salary: bool = False,
+        date_from: Optional[str] = None,
+        date_to: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Поиск вакансий"""
         params = {
@@ -143,11 +166,16 @@ class HHClient:
             "per_page": per_page,
             "only_with_salary": only_with_salary,
             "order_by": "relevance",
-            "locale": "RU"
+            "locale": "RU",
+            "host": settings.hh_api_host,
         }
 
         if search_field:
             params["search_field"] = search_field
+        if date_from:
+            params["date_from"] = date_from
+        if date_to:
+            params["date_to"] = date_to
         
         response = await self.make_request("GET", "/vacancies", params=params)
         return response.json()

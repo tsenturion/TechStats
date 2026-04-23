@@ -126,6 +126,31 @@ class AnalysisProxy:
         if text:
             return text
         return f"{type(exc).__name__} (empty error message)"
+
+    @staticmethod
+    def _build_ws_result_summary(result: Dict[str, Any]) -> Dict[str, Any]:
+        cache_info = result.get("cache_info", {}) if isinstance(result.get("cache_info"), dict) else {}
+        request_stats = result.get("request_stats", {}) if isinstance(result.get("request_stats"), dict) else {}
+        return {
+            "vacancy_title": result.get("vacancy_title"),
+            "technology": result.get("technology"),
+            "exact_search": result.get("exact_search"),
+            "requested_vacancies": result.get("requested_vacancies"),
+            "total_vacancies": result.get("total_vacancies"),
+            "tech_vacancies": result.get("tech_vacancies"),
+            "tech_percentage": result.get("tech_percentage"),
+            "duplicate_vacancies_count": result.get("duplicate_vacancies_count"),
+            "duplicate_groups_count": result.get("duplicate_groups_count"),
+            "duplicate_extra_count": result.get("duplicate_extra_count"),
+            "analysis_timestamp": result.get("analysis_timestamp"),
+            "cache_info": {
+                "total_cached": cache_info.get("total_cached"),
+                "newly_analyzed": cache_info.get("newly_analyzed"),
+                "cache_usage_percentage": cache_info.get("cache_usage_percentage"),
+                "vacancy_search_index_cache_hit": cache_info.get("vacancy_search_index_cache_hit"),
+            },
+            "request_stats": request_stats,
+        }
         
     async def start_analysis(self, websocket: WebSocket, request_data: Dict[str, Any]):
         """Запуск анализа с отправкой прогресса через WebSocket"""
@@ -625,13 +650,22 @@ class AnalysisProxy:
             await self.session_store.complete_session(session_id, result)
             
             # Отправка финального результата
+            with_tech_count = len(result.get("vacancies_with_tech", [])) if isinstance(result.get("vacancies_with_tech"), list) else 0
+            without_tech_count = len(result.get("vacancies_without_tech", [])) if isinstance(result.get("vacancies_without_tech"), list) else 0
             await self._send_progress(
                 websocket,
                 stage="completed",
                 message="Анализ завершен!",
                 progress=100,
                 session_id=session_id,
-                metadata={"result": result}
+                metadata={
+                    "result": self._build_ws_result_summary(result),
+                    "result_truncated": True,
+                    "session_result_available": True,
+                    "session_endpoint": f"/api/v1/ws/sessions/{session_id}",
+                    "with_tech_count": with_tech_count,
+                    "without_tech_count": without_tech_count,
+                },
             )
             
             logger.info(
