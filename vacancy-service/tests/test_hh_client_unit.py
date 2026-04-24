@@ -15,6 +15,12 @@ class DummyResponse:
         return self._payload
 
 
+def _disable_auth(monkeypatch):
+    monkeypatch.setattr(settings, "hh_api_access_token", "")
+    monkeypatch.setattr(settings, "hh_api_client_id", "")
+    monkeypatch.setattr(settings, "hh_api_client_secret", "")
+
+
 @pytest.mark.asyncio
 async def test_search_vacancies_builds_expected_params(monkeypatch):
     client = HHClient()
@@ -36,7 +42,6 @@ async def test_search_vacancies_builds_expected_params(monkeypatch):
     assert captured["params"]["page"] == 1
     assert captured["params"]["per_page"] == 20
     assert captured["params"]["search_field"] == "name"
-    assert captured["params"]["host"] == settings.hh_api_host
 
 
 @pytest.mark.asyncio
@@ -64,7 +69,6 @@ async def test_search_vacancies_omits_search_field_when_not_provided(monkeypatch
     assert captured["endpoint"] == "/vacancies"
     assert captured["params"]["text"] == "chemistry"
     assert "search_field" not in captured["params"]
-    assert captured["params"]["host"] == settings.hh_api_host
 
 
 @pytest.mark.asyncio
@@ -94,18 +98,18 @@ async def test_search_vacancies_passes_date_range_filters(monkeypatch):
     assert captured["endpoint"] == "/vacancies"
     assert captured["params"]["date_from"] == "2026-03-01T00:00:00Z"
     assert captured["params"]["date_to"] == "2026-03-10T23:59:59Z"
-    assert captured["params"]["host"] == settings.hh_api_host
 
 
 @pytest.mark.asyncio
 async def test_make_request_maps_vacancies_403_to_domain_error(monkeypatch):
     client = HHClient()
+    _disable_auth(monkeypatch)
 
     async def fake_rate_limit():
         return None
 
     class FakeHTTPClient:
-        async def request(self, method, url, params=None, json=None):  # noqa: A002
+        async def request(self, method, url, params=None, json=None, headers=None):  # noqa: A002
             request = httpx.Request(method, f"https://api.hh.ru{url}", params=params)
             return httpx.Response(
                 403,
@@ -119,6 +123,82 @@ async def test_make_request_maps_vacancies_403_to_domain_error(monkeypatch):
 
     with pytest.raises(HHVacancySearchForbiddenError):
         await client.make_request("GET", "/vacancies", params={"text": "devops"})
+
+
+@pytest.mark.asyncio
+async def test_make_request_uses_client_credentials_token(monkeypatch):
+    client = HHClient()
+    captured = {"token_requests": 0, "auth_headers": []}
+
+    monkeypatch.setattr(settings, "hh_api_access_token", "")
+    monkeypatch.setattr(settings, "hh_api_client_id", "cid")
+    monkeypatch.setattr(settings, "hh_api_client_secret", "secret")
+
+    async def fake_rate_limit():
+        return None
+
+    class FakeHTTPClient:
+        async def post(self, url, data=None, params=None):
+            captured["token_requests"] += 1
+            request = httpx.Request("POST", f"https://api.hh.ru{url}", params=params)
+            return httpx.Response(
+                200,
+                request=request,
+                json={"access_token": "oauth-token-1", "token_type": "bearer", "expires_in": 3600},
+            )
+
+        async def request(self, method, url, params=None, json=None, headers=None):  # noqa: A002
+            captured["auth_headers"].append((headers or {}).get("Authorization"))
+            request = httpx.Request(method, f"https://api.hh.ru{url}", params=params)
+            return httpx.Response(200, request=request, json={"items": []})
+
+    monkeypatch.setattr(client, "_rate_limit", fake_rate_limit)
+    client.client = FakeHTTPClient()
+
+    response_1 = await client.make_request("GET", "/areas")
+    response_2 = await client.make_request("GET", "/industries")
+
+    assert response_1.status_code == 200
+    assert response_2.status_code == 200
+    assert captured["token_requests"] == 1
+    assert captured["auth_headers"] == ["Bearer oauth-token-1", "Bearer oauth-token-1"]
+
+
+@pytest.mark.asyncio
+async def test_make_request_prefers_static_access_token_over_client_credentials(monkeypatch):
+    client = HHClient()
+    captured = {"token_requests": 0, "auth_headers": []}
+
+    monkeypatch.setattr(settings, "hh_api_access_token", "static-token")
+    monkeypatch.setattr(settings, "hh_api_client_id", "cid")
+    monkeypatch.setattr(settings, "hh_api_client_secret", "secret")
+
+    async def fake_rate_limit():
+        return None
+
+    class FakeHTTPClient:
+        async def post(self, url, data=None, params=None):
+            captured["token_requests"] += 1
+            request = httpx.Request("POST", f"https://api.hh.ru{url}", params=params)
+            return httpx.Response(
+                200,
+                request=request,
+                json={"access_token": "oauth-token-1", "token_type": "bearer", "expires_in": 3600},
+            )
+
+        async def request(self, method, url, params=None, json=None, headers=None):  # noqa: A002
+            captured["auth_headers"].append((headers or {}).get("Authorization"))
+            request = httpx.Request(method, f"https://api.hh.ru{url}", params=params)
+            return httpx.Response(200, request=request, json={"items": []})
+
+    monkeypatch.setattr(client, "_rate_limit", fake_rate_limit)
+    client.client = FakeHTTPClient()
+
+    response = await client.make_request("GET", "/areas")
+
+    assert response.status_code == 200
+    assert captured["token_requests"] == 0
+    assert captured["auth_headers"] == ["Bearer static-token"]
 
 
 @pytest.mark.asyncio

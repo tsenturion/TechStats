@@ -13,6 +13,8 @@ class Settings(BaseSettings):
     hh_api_base_url: str = "https://api.hh.ru"
     hh_api_host: str = "hh.ru"
     hh_api_user_agent: str = "TechStats/1.0 (admin@techstats.local)"
+    hh_api_client_id: str = ""
+    hh_api_client_secret: str = ""
     hh_api_access_token: str = ""
     hh_api_timeout: int = 30
     
@@ -36,6 +38,7 @@ class Settings(BaseSettings):
     
     class Config:
         env_file = ".env"
+        extra = "ignore"
 
 
 settings = Settings()

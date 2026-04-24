@@ -186,6 +186,11 @@ services:
       - ENVIRONMENT=development
       - REDIS_URL=redis://redis:6379
       - HH_API_BASE_URL=https://api.hh.ru
+      - HH_API_HOST=${HH_API_HOST:-hh.ru}
+      - HH_API_USER_AGENT=${HH_API_USER_AGENT:-TechStats/1.0 (api@techstats.local)}
+      - HH_API_CLIENT_ID=${HH_API_CLIENT_ID}
+      - HH_API_CLIENT_SECRET=${HH_API_CLIENT_SECRET}
+      - HH_API_ACCESS_TOKEN=${HH_API_ACCESS_TOKEN:-}
       - HH_RATE_LIMIT_PER_SECOND=7
       - HH_RATE_LIMIT_PER_DAY=50000
       - CACHE_TTL_HOURS=24

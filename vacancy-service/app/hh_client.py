@@ -25,6 +25,9 @@ class HHClient:
         self.rate_limiter: Optional[RateLimiter] = None
         self.last_request_time: float = 0
         self.request_lock = asyncio.Lock()
+        self.token_lock = asyncio.Lock()
+        self.oauth_access_token: Optional[str] = None
+        self.oauth_expires_at: float = 0.0
         
     async def initialize(self):
         """Инициализация клиента"""
@@ -34,8 +37,6 @@ class HHClient:
             "Accept": "application/json",
             "Accept-Charset": "utf-8"
         }
-        if settings.hh_api_access_token:
-            headers["Authorization"] = f"Bearer {settings.hh_api_access_token}"
 
         self.client = build_async_client(
             base_url=settings.hh_api_base_url,
@@ -63,6 +64,78 @@ class HHClient:
                 await asyncio.sleep(sleep_time)
                 
             self.last_request_time = time.time()
+
+    @staticmethod
+    def _trimmed(value: Optional[str]) -> str:
+        return str(value or "").strip()
+
+    def _static_access_token(self) -> str:
+        return self._trimmed(settings.hh_api_access_token)
+
+    def _oauth_credentials_available(self) -> bool:
+        return bool(self._trimmed(settings.hh_api_client_id) and self._trimmed(settings.hh_api_client_secret))
+
+    async def _fetch_oauth_access_token(self) -> str:
+        if self.client is None:
+            raise RuntimeError("HH client is not initialized")
+
+        form_data = {
+            "grant_type": "client_credentials",
+            "client_id": self._trimmed(settings.hh_api_client_id),
+            "client_secret": self._trimmed(settings.hh_api_client_secret),
+        }
+        query_params: Dict[str, str] = {}
+        if settings.hh_api_host:
+            query_params["host"] = settings.hh_api_host
+        query_params["locale"] = "RU"
+
+        response = await self.client.post(
+            "/token",
+            data=form_data,
+            params=query_params,
+        )
+        response.raise_for_status()
+        payload = response.json() if response.content else {}
+
+        token = self._trimmed(payload.get("access_token"))
+        if not token:
+            raise RuntimeError("HH token endpoint did not return access_token")
+
+        expires_in_raw = payload.get("expires_in", 3600)
+        try:
+            expires_in = int(expires_in_raw)
+        except (TypeError, ValueError):
+            expires_in = 3600
+        refresh_margin = 60
+        ttl = max(60, expires_in - refresh_margin)
+
+        self.oauth_access_token = token
+        self.oauth_expires_at = time.time() + ttl
+        logger.info("HH OAuth app token refreshed", expires_in=expires_in)
+        return token
+
+    async def _get_effective_access_token(self) -> str:
+        static_token = self._static_access_token()
+        if static_token:
+            return static_token
+
+        if not self._oauth_credentials_available():
+            return ""
+
+        now = time.time()
+        if self.oauth_access_token and now < self.oauth_expires_at:
+            return self.oauth_access_token
+
+        async with self.token_lock:
+            now = time.time()
+            if self.oauth_access_token and now < self.oauth_expires_at:
+                return self.oauth_access_token
+            return await self._fetch_oauth_access_token()
+
+    async def _invalidate_oauth_token(self) -> None:
+        async with self.token_lock:
+            self.oauth_access_token = None
+            self.oauth_expires_at = 0.0
     
     @retry(
         stop=stop_after_attempt(settings.max_retries),
@@ -87,12 +160,33 @@ class HHClient:
             request_params["host"] = settings.hh_api_host
 
         try:
+            access_token = await self._get_effective_access_token()
+            request_headers: Optional[Dict[str, str]] = None
+            if access_token:
+                request_headers = {"Authorization": f"Bearer {access_token}"}
+
             response = await self.client.request(
                 method=method,
                 url=url,
                 params=request_params,
-                json=json_data
+                json=json_data,
+                headers=request_headers,
             )
+
+            # For OAuth app token auto-refresh once on auth failures.
+            static_token = self._static_access_token()
+            token_from_oauth = bool(access_token and not static_token and self._oauth_credentials_available())
+            if response.status_code == 401 and token_from_oauth:
+                await self._invalidate_oauth_token()
+                refreshed_token = await self._get_effective_access_token()
+                retry_headers = {"Authorization": f"Bearer {refreshed_token}"} if refreshed_token else None
+                response = await self.client.request(
+                    method=method,
+                    url=url,
+                    params=request_params,
+                    json=json_data,
+                    headers=retry_headers,
+                )
             
             # Логирование
             logger.debug(
@@ -127,7 +221,13 @@ class HHClient:
                     server=e.response.headers.get("server"),
                     request_id=e.response.headers.get("x-request-id"),
                 )
-                if method.upper() == "GET" and url == "/vacancies":
+                failed_path = ""
+                try:
+                    failed_path = str(e.request.url.path)
+                except Exception:  # noqa: BLE001
+                    failed_path = url
+
+                if method.upper() == "GET" and failed_path == "/vacancies":
                     body_preview = (e.response.text or "").strip()
                     if len(body_preview) > 400:
                         body_preview = f"{body_preview[:400]}..."
@@ -167,7 +267,6 @@ class HHClient:
             "only_with_salary": only_with_salary,
             "order_by": "relevance",
             "locale": "RU",
-            "host": settings.hh_api_host,
         }
 
         if search_field:

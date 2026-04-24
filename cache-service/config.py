@@ -78,6 +78,7 @@ class Settings(BaseSettings):
 
     class Config:
         env_file = ".env"
+        extra = "ignore"
 
     def get_redis_cluster_nodes(self) -> List[str]:
         """Получение списка нод Redis кластера"""

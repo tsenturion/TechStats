@@ -1,6 +1,7 @@
 # C:\Users\user\Desktop\TechStats\analyzer-service\app\analyzer.py
 import re
 import asyncio
+import html
 from typing import Dict, List, Set, Tuple, Optional, Any
 from collections import defaultdict
 import nltk
@@ -317,6 +318,48 @@ class PatternMatcher:
             names.append(str(raw_value))
 
         return " ".join(names)
+
+    @classmethod
+    def _flatten_text_value(cls, value: Any) -> str:
+        if value is None:
+            return ""
+        if isinstance(value, str):
+            return value
+        if isinstance(value, dict):
+            parts = [cls._flatten_text_value(item) for item in value.values()]
+            return " ".join(part for part in parts if part)
+        if isinstance(value, (list, tuple, set)):
+            parts = [cls._flatten_text_value(item) for item in value]
+            return " ".join(part for part in parts if part)
+        return str(value)
+
+    @classmethod
+    def _sanitize_text_for_matching(cls, value: Any) -> str:
+        text = cls._flatten_text_value(value)
+        if not text:
+            return ""
+
+        text = html.unescape(text)
+        # Удаляем script/style и HTML-комментарии: это частый источник ложных
+        # срабатываний (например "text/css", ".css", ".css(...)").
+        text = re.sub(r"(?is)<(script|style)\b[^>]*>.*?</\1>", " ", text)
+        text = re.sub(r"(?is)<!--.*?-->", " ", text)
+        # Удаляем HTML-теги.
+        text = re.sub(r"(?is)<[^>]+>", " ", text)
+        # Удаляем URL/email.
+        text = re.sub(r"https?://\S+|www\.\S+", " ", text, flags=re.IGNORECASE)
+        text = re.sub(r"\S+@\S+", " ", text)
+        # Удаляем статические asset-файлы и MIME-типы, которые дают шум для CSS/JS.
+        text = re.sub(
+            r"\b[\w./-]+\.(?:css|js|mjs|map|svg|png|jpe?g|gif|webp|ico)\b",
+            " ",
+            text,
+            flags=re.IGNORECASE,
+        )
+        text = re.sub(r"\b(?:text|application)/(?:css|javascript|x-javascript)\b", " ", text, flags=re.IGNORECASE)
+        # Схлопываем пробелы.
+        text = re.sub(r"\s+", " ", text).strip()
+        return text
         
     async def find_technology(
         self,
@@ -396,11 +439,12 @@ class PatternMatcher:
             if field not in search_fields and field != "full_text":
                 continue
             
-            if not field_text:
+            sanitized_field_text = self._sanitize_text_for_matching(field_text)
+            if not sanitized_field_text:
                 continue
             
             # Поиск по простому regex
-            normalized_field_text = field_text.lower()
+            normalized_field_text = sanitized_field_text.lower()
             regex_matches = list(pattern.finditer(normalized_field_text))
             # Дополнительный fallback на случай старого/узкого паттерна в БД.
             if (
@@ -418,12 +462,21 @@ class PatternMatcher:
                         "text": match.group(),
                         "start": match.start(),
                         "end": match.end(),
-                        "context": self._get_context(field_text, match.start(), match.end())
+                        "context": self._get_context(sanitized_field_text, match.start(), match.end())
                     })
         
         # Дополнительный поиск по нормализованным токенам
         if not found and settings.enable_stemming:
-            processed_text = ' '.join(self.text_analyzer.process_text(str(text)))
+            if isinstance(text, dict):
+                normalized_source = " ".join(
+                    self._sanitize_text_for_matching(field_value)
+                    for field_name, field_value in text_dict.items()
+                    if field_name in search_fields or field_name == "full_text"
+                ).strip()
+            else:
+                normalized_source = self._sanitize_text_for_matching(text)
+
+            processed_text = ' '.join(self.text_analyzer.process_text(normalized_source))
             if processed_text:
                 regex_matches = list(pattern.finditer(processed_text))
                 if regex_matches:
