@@ -1,4 +1,3 @@
-# C:\Users\user\Desktop\TechStats\api-gateway\app\routers\analyzer.py
 import asyncio
 import json
 from typing import Any, Dict

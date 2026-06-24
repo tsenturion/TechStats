@@ -1,4 +1,3 @@
-# C:\Users\user\Desktop\TechStats\cache-service\app\routers\cache.py
 import asyncio
 import time
 from typing import Dict, List, Any, Optional

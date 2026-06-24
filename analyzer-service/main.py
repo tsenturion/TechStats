@@ -1,4 +1,3 @@
-# C:\Users\user\Desktop\TechStats\analyzer-service\main.py
 import time
 from contextlib import asynccontextmanager
 

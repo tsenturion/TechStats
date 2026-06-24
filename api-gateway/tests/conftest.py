@@ -55,6 +55,7 @@ os.environ["ADMIN_USERNAME"] = "admin"
 os.environ["ADMIN_PASSWORD"] = "admin"
 os.environ["USER_USERNAME"] = "user"
 os.environ["USER_PASSWORD"] = "user"
+os.environ["CORS_ORIGINS"] = '["http://localhost:8088"]'
 
 
 @pytest.fixture(autouse=True)

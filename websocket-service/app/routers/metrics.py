@@ -1,4 +1,3 @@
-# C:\Users\user\Desktop\TechStats\websocket-service\app\routers\metrics.py
 from fastapi import APIRouter
 from fastapi.responses import Response
 from prometheus_client import generate_latest, CONTENT_TYPE_LATEST

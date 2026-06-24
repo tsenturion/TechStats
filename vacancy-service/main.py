@@ -1,4 +1,3 @@
-# C:\Users\user\Desktop\TechStats\vacancy-service\main.py
 import time
 from contextlib import asynccontextmanager
 

@@ -1,4 +1,3 @@
-# C:\Users\user\Desktop\TechStats\analyzer-service\app\routers\analyze.py
 import asyncio
 import hashlib
 import html

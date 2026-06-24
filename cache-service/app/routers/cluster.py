@@ -1,4 +1,3 @@
-# C:\Users\user\Desktop\TechStats\cache-service\app\routers\cluster.py
 import time
 from typing import Dict, Any
 from fastapi import APIRouter, HTTPException, Body, Query, Depends, Request

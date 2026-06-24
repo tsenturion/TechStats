@@ -1,4 +1,3 @@
-# C:\Users\user\Desktop\TechStats\analyzer-service\config.py
 from pydantic_settings import BaseSettings
 from typing import Optional, Dict, Any
 
@@ -6,7 +5,7 @@ from typing import Optional, Dict, Any
 class Settings(BaseSettings):
     # Основные настройки
     app_name: str = "TechStats Analyzer Service"
-    debug: bool = True
+    debug: bool = False
     environment: str = "production"
     version: str = "1.0.0"
     

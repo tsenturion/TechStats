@@ -1,4 +1,3 @@
-# C:\Users\user\Desktop\TechStats\websocket-service\main.py
 import asyncio
 import time
 from contextlib import asynccontextmanager

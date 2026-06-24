@@ -1,4 +1,3 @@
-# C:\Users\user\Desktop\TechStats\cache-service\app\cleanup_scheduler.py
 import asyncio
 import time
 from typing import Optional, Dict, Any

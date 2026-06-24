@@ -1,4 +1,3 @@
-# C:\Users\user\Desktop\TechStats\vacancy-service\app\routers\vacancies.py
 import asyncio
 from typing import Dict, Any, Optional
 import httpx

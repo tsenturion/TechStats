@@ -34,7 +34,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sum(up{job=~\"api-gateway|vacancy-service|analyzer-service|websocket-service|cache-service|node-exporter\"})"
+          "expr": "sum(up{job=~\"api-gateway|vacancy-service|analyzer-service|websocket-service|cache-service|redis\"})"
         }
       ]
     },
@@ -48,7 +48,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sum(1 - up{job=~\"api-gateway|vacancy-service|analyzer-service|websocket-service|cache-service|node-exporter\"})"
+          "expr": "sum(1 - up{job=~\"api-gateway|vacancy-service|analyzer-service|websocket-service|cache-service|redis\"})"
         }
       ]
     },
@@ -62,7 +62,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "100 * avg(up{job=~\"api-gateway|vacancy-service|analyzer-service|websocket-service|cache-service|node-exporter\"})"
+          "expr": "100 * avg(up{job=~\"api-gateway|vacancy-service|analyzer-service|websocket-service|cache-service|redis\"})"
         }
       ]
     },
@@ -76,7 +76,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "100 * avg by(job) (up{job=~\"api-gateway|vacancy-service|analyzer-service|websocket-service|cache-service|node-exporter\"})",
+          "expr": "100 * avg by(job) (up{job=~\"api-gateway|vacancy-service|analyzer-service|websocket-service|cache-service|redis\"})",
           "legendFormat": "{{job}}"
         }
       ]
@@ -232,14 +232,14 @@
     {
       "id": 15,
       "type": "stat",
-      "title": "CPU Usage %",
+      "title": "Process CPU Seconds/sec",
       "gridPos": { "h": 4, "w": 6, "x": 18, "y": 20 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "fieldConfig": { "defaults": { "unit": "percent", "decimals": 1 }, "overrides": [] },
+      "fieldConfig": { "defaults": { "unit": "none", "decimals": 3 }, "overrides": [] },
       "targets": [
         {
           "refId": "A",
-          "expr": "100 - (avg(rate(node_cpu_seconds_total{job=\"node-exporter\",mode=\"idle\"}[5m])) * 100)"
+          "expr": "sum(rate(process_cpu_seconds_total{job=~\"api-gateway|vacancy-service|analyzer-service|websocket-service|cache-service\"}[5m]))"
         }
       ]
     },
@@ -316,30 +316,30 @@
     {
       "id": 20,
       "type": "timeseries",
-      "title": "Memory Usage % By Instance",
+      "title": "Process RSS Memory By Job",
       "gridPos": { "h": 8, "w": 8, "x": 8, "y": 32 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "fieldConfig": { "defaults": { "unit": "percent" }, "overrides": [] },
+      "fieldConfig": { "defaults": { "unit": "bytes" }, "overrides": [] },
       "targets": [
         {
           "refId": "A",
-          "expr": "(1 - (node_memory_MemAvailable_bytes{job=\"node-exporter\"} / node_memory_MemTotal_bytes{job=\"node-exporter\"})) * 100",
-          "legendFormat": "{{instance}}"
+          "expr": "sum by(job) (process_resident_memory_bytes{job=~\"api-gateway|vacancy-service|analyzer-service|websocket-service|cache-service\"})",
+          "legendFormat": "{{job}}"
         }
       ]
     },
     {
       "id": 21,
       "type": "timeseries",
-      "title": "Disk Usage % By Mount",
+      "title": "Redis Memory",
       "gridPos": { "h": 8, "w": 8, "x": 16, "y": 32 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "fieldConfig": { "defaults": { "unit": "percent" }, "overrides": [] },
+      "fieldConfig": { "defaults": { "unit": "bytes" }, "overrides": [] },
       "targets": [
         {
           "refId": "A",
-          "expr": "100 * (1 - (node_filesystem_avail_bytes{job=\"node-exporter\",fstype!~\"tmpfs|overlay\"} / node_filesystem_size_bytes{job=\"node-exporter\",fstype!~\"tmpfs|overlay\"}))",
-          "legendFormat": "{{instance}} {{mountpoint}}"
+          "expr": "redis_memory_used_bytes{job=\"redis\"}",
+          "legendFormat": "redis"
         }
       ]
     },

@@ -1,4 +1,3 @@
-# C:\Users\user\Desktop\TechStats\cache-service\config.py
 import json
 from typing import List, Optional
 from enum import Enum
@@ -21,7 +20,7 @@ class CacheStrategy(str, Enum):
 class Settings(BaseSettings):
     # Основные настройки
     app_name: str = "TechStats Cache Service"
-    debug: bool = True
+    debug: bool = False
     environment: str = "production"
     version: str = "1.0.0"
 
@@ -74,7 +73,7 @@ class Settings(BaseSettings):
     metrics_port: int = 9091
 
     # Административный доступ
-    admin_token: str = "admin_secret_token"
+    admin_token: str = ""
 
     class Config:
         env_file = ".env"

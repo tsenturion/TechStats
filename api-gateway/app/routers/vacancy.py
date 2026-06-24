@@ -1,4 +1,3 @@
-# C:\Users\user\Desktop\TechStats\api-gateway\app\routers\vacancy.py
 import asyncio
 from typing import List
 

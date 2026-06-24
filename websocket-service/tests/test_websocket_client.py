@@ -1,5 +1,6 @@
 import asyncio
 import json
+import os
 
 import httpx
 import pytest
@@ -8,6 +9,7 @@ import websockets
 
 BASE_URL = "http://localhost:8004"
 WS_URL = "ws://localhost:8004/api/v1/ws/analyze"
+ADMIN_TOKEN = os.getenv("WEBSOCKET_ADMIN_TOKEN", "techstats-dev-websocket-admin-token")
 
 
 async def _ensure_service_available() -> None:
@@ -72,7 +74,7 @@ async def test_admin_endpoints():
         unauthorized = await client.get(f"{BASE_URL}/api/v1/admin/connections")
         assert unauthorized.status_code in {401, 403}
 
-        headers = {"Authorization": "Bearer admin_secret_token"}
+        headers = {"Authorization": f"Bearer {ADMIN_TOKEN}"}
         connections = await client.get(f"{BASE_URL}/api/v1/admin/connections", headers=headers)
         assert connections.status_code == 200
 

@@ -30,7 +30,7 @@ npm run preview
 The root `docker-compose.yml` includes `frontend` service.
 
 ```bash
-docker compose up -d --build frontend
+docker compose -f ../docker-compose.yml -f ../docker-compose.dev.yml up -d --build frontend nginx
 ```
 
-Open: `http://localhost:8088`
+Open: `http://localhost:8080`

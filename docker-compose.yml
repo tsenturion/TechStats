@@ -1,31 +1,45 @@
-# Обновляем docker-compose.yml с Cache Service
+name: techstats
+
+x-backend-build: &backend-build
+  context: .
+  target: runtime
+
+x-service-env: &service-env
+  ENVIRONMENT: ${ENVIRONMENT:-production}
+  DEBUG: ${DEBUG:-false}
+  REDIS_URL: redis://redis:6379
 
 services:
-  # Redis для кэша
   redis:
     image: redis:7-alpine
-    container_name: techstats-redis
     restart: unless-stopped
-    ports:
-      - "6379:6379"
+    command: redis-server --appendonly yes --maxmemory ${REDIS_MAXMEMORY:-512mb} --maxmemory-policy allkeys-lru
     volumes:
       - redis-data:/data
-    command: redis-server --appendonly yes --maxmemory 512mb --maxmemory-policy allkeys-lru
     networks:
       - techstats-network
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
       timeout: 5s
-      retries: 3
+      retries: 5
 
-  # MongoDB для persistent cache (опционально)
+  redis-exporter:
+    image: oliver006/redis_exporter:v1.67.0
+    restart: unless-stopped
+    environment:
+      REDIS_ADDR: redis://redis:6379
+    networks:
+      - techstats-network
+    depends_on:
+      redis:
+        condition: service_healthy
+
   mongo:
     image: mongo:6
-    container_name: techstats-mongo
+    profiles:
+      - mongo
     restart: unless-stopped
-    ports:
-      - "27017:27017"
     volumes:
       - mongo-data:/data/db
     networks:
@@ -35,129 +49,59 @@ services:
       test: echo 'db.runCommand("ping").ok' | mongosh localhost:27017/test --quiet
       interval: 30s
       timeout: 10s
-      retries: 3
+      retries: 5
 
-  # Cache Service
   cache-service:
-    build: ./cache-service
-    container_name: techstats-cache-service
+    build:
+      <<: *backend-build
+      dockerfile: cache-service/Dockerfile
     restart: unless-stopped
-    ports:
-      - "8003:8003"
     environment:
-      - ENVIRONMENT=development
-      - NODE_ID=cache-node-1
-      - REDIS_URL=redis://redis:6379
-      - MONGO_URL=mongodb://mongo:27017
-      - CACHE_BACKEND=redis
-      - CACHE_STRATEGY=lru
-      - DEFAULT_TTL_SECONDS=3600
-      - MAX_CACHE_SIZE_MB=1024
-      - CLEANUP_INTERVAL_SECONDS=300
-      - ENABLE_CLUSTERING=false
-      - CLUSTER_NODES=http://cache-service:8003,http://cache-service-2:8003,http://cache-service-3:8003
-      - REDIS_CLUSTER_NODES=redis://redis-1:6379,redis://redis-2:6379,redis://redis-3:6379
-      - API_RATE_LIMIT_PER_MINUTE=1000
-      - API_RATE_LIMIT_PER_HOUR=10000
-    volumes:
-      - ./cache-service:/app
-      - ./shared:/app/shared
-      - ./cache-service/logs:/app/logs
+      <<: *service-env
+      NODE_ID: ${CACHE_NODE_ID:-cache-node-1}
+      MONGO_ENABLED: ${MONGO_ENABLED:-false}
+      MONGO_URL: ${MONGO_URL:-mongodb://mongo:27017}
+      CACHE_BACKEND: ${CACHE_BACKEND:-redis}
+      CACHE_STRATEGY: ${CACHE_STRATEGY:-lru}
+      DEFAULT_TTL_SECONDS: ${DEFAULT_TTL_SECONDS:-3600}
+      MAX_CACHE_SIZE_MB: ${MAX_CACHE_SIZE_MB:-1024}
+      CLEANUP_INTERVAL_SECONDS: ${CLEANUP_INTERVAL_SECONDS:-300}
+      ENABLE_CLUSTERING: ${ENABLE_CLUSTERING:-false}
+      CLUSTER_NODES: ${CLUSTER_NODES:-}
+      REDIS_CLUSTER_MODE: ${REDIS_CLUSTER_MODE:-false}
+      REDIS_CLUSTER_NODES: ${REDIS_CLUSTER_NODES:-}
+      API_RATE_LIMIT_PER_MINUTE: ${CACHE_API_RATE_LIMIT_PER_MINUTE:-1000}
+      API_RATE_LIMIT_PER_HOUR: ${CACHE_API_RATE_LIMIT_PER_HOUR:-10000}
+      ADMIN_TOKEN: ${CACHE_ADMIN_TOKEN:-}
     networks:
       - techstats-network
     depends_on:
       redis:
         condition: service_healthy
-      mongo:
-        condition: service_healthy
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8003/api/v1/health/ready')"]
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8003/api/v1/health/ready')"]
       interval: 30s
       timeout: 10s
-      retries: 3
+      retries: 5
 
-  # Cache Service Node 2 (для тестирования кластера)
-  cache-service-2:
-    build: ./cache-service
-    container_name: techstats-cache-service-2
-    restart: unless-stopped
-    ports:
-      - "8014:8003"
-    environment:
-      - ENVIRONMENT=development
-      - NODE_ID=cache-node-2
-      - REDIS_URL=redis://redis:6379
-      - CACHE_BACKEND=redis
-      - CACHE_STRATEGY=lru
-      - DEFAULT_TTL_SECONDS=3600
-      - ENABLE_CLUSTERING=true
-      - CLUSTER_NODES=http://cache-service:8003,http://cache-service-2:8003,http://cache-service-3:8003
-    volumes:
-      - ./cache-service:/app
-      - ./shared:/app/shared
-    networks:
-      - techstats-network
-    depends_on:
-      - redis
-      - cache-service
-    healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8003/api/v1/health')"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-
-  # Cache Service Node 3 (для тестирования кластера)
-  cache-service-3:
-    build: ./cache-service
-    container_name: techstats-cache-service-3
-    restart: unless-stopped
-    ports:
-      - "8015:8003"
-    environment:
-      - ENVIRONMENT=development
-      - NODE_ID=cache-node-3
-      - REDIS_URL=redis://redis:6379
-      - CACHE_BACKEND=redis
-      - CACHE_STRATEGY=lru
-      - DEFAULT_TTL_SECONDS=3600
-      - ENABLE_CLUSTERING=true
-      - CLUSTER_NODES=http://cache-service:8003,http://cache-service-2:8003,http://cache-service-3:8003
-    volumes:
-      - ./cache-service:/app
-      - ./shared:/app/shared
-    networks:
-      - techstats-network
-    depends_on:
-      - redis
-      - cache-service
-    healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8003/api/v1/health')"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-
-  # API Gateway (обновляем зависимости)
   api-gateway:
-    build: ./api-gateway
-    container_name: techstats-api-gateway
+    build:
+      <<: *backend-build
+      dockerfile: api-gateway/Dockerfile
     restart: unless-stopped
-    ports:
-      - "8000:8000"
     environment:
-      - ENVIRONMENT=development
-      - REDIS_URL=redis://redis:6379
-      - VACANCY_SERVICE_URL=http://vacancy-service:8001
-      - ANALYZER_SERVICE_URL=http://analyzer-service:8002
-      - CACHE_SERVICE_URL=http://cache-service:8003
-      - WEBSOCKET_SERVICE_URL=http://websocket-service:8004
-      - ADMIN_USERNAME=admin
-      - ADMIN_PASSWORD=admin
-      - USER_USERNAME=user
-      - USER_PASSWORD=user
-      - JWT_SECRET_KEY=techstats-dev-jwt-secret
-    volumes:
-      - ./api-gateway:/app
-      - ./shared:/app/shared
+      <<: *service-env
+      VACANCY_SERVICE_URL: http://vacancy-service:8001
+      ANALYZER_SERVICE_URL: http://analyzer-service:8002
+      CACHE_SERVICE_URL: http://cache-service:8003
+      WEBSOCKET_SERVICE_URL: http://websocket-service:8004
+      ADMIN_USERNAME: ${ADMIN_USERNAME:-}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
+      USER_USERNAME: ${USER_USERNAME:-}
+      USER_PASSWORD: ${USER_PASSWORD:-}
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:-}
+      JWT_ALGORITHM: ${JWT_ALGORITHM:-HS256}
+      CORS_ORIGINS: ${CORS_ORIGINS:-["http://localhost:8080"]}
     networks:
       - techstats-network
     depends_on:
@@ -170,70 +114,55 @@ services:
       cache-service:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/v1/health')"]
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/v1/health/ready')"]
       interval: 30s
       timeout: 10s
-      retries: 3
+      retries: 5
 
-  # Vacancy Service
   vacancy-service:
-    build: ./vacancy-service
-    container_name: techstats-vacancy-service
+    build:
+      <<: *backend-build
+      dockerfile: vacancy-service/Dockerfile
     restart: unless-stopped
-    ports:
-      - "8001:8001"
     environment:
-      - ENVIRONMENT=development
-      - REDIS_URL=redis://redis:6379
-      - HH_API_BASE_URL=https://api.hh.ru
-      - HH_API_HOST=${HH_API_HOST:-hh.ru}
-      - HH_API_USER_AGENT=${HH_API_USER_AGENT:-TechStats/1.0 (api@techstats.local)}
-      - HH_API_CLIENT_ID=${HH_API_CLIENT_ID}
-      - HH_API_CLIENT_SECRET=${HH_API_CLIENT_SECRET}
-      - HH_API_ACCESS_TOKEN=${HH_API_ACCESS_TOKEN:-}
-      - HH_RATE_LIMIT_PER_SECOND=7
-      - HH_RATE_LIMIT_PER_DAY=50000
-      - CACHE_TTL_HOURS=24
-    volumes:
-      - ./vacancy-service:/app
-      - ./shared:/app/shared
-      - ./vacancy-service/logs:/app/logs
+      <<: *service-env
+      HH_API_BASE_URL: ${HH_API_BASE_URL:-https://api.hh.ru}
+      HH_API_HOST: ${HH_API_HOST:-hh.ru}
+      HH_API_USER_AGENT: ${HH_API_USER_AGENT:-TechStats/1.0 (api@techstats.local)}
+      HH_API_CLIENT_ID: ${HH_API_CLIENT_ID:-}
+      HH_API_CLIENT_SECRET: ${HH_API_CLIENT_SECRET:-}
+      HH_API_ACCESS_TOKEN: ${HH_API_ACCESS_TOKEN:-}
+      HH_RATE_LIMIT_PER_SECOND: ${HH_RATE_LIMIT_PER_SECOND:-7}
+      HH_RATE_LIMIT_PER_DAY: ${HH_RATE_LIMIT_PER_DAY:-50000}
+      CACHE_TTL_HOURS: ${VACANCY_CACHE_TTL_HOURS:-24}
     networks:
       - techstats-network
     depends_on:
       redis:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8001/api/v1/health/ready')"]
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8001/api/v1/health/ready')"]
       interval: 30s
       timeout: 10s
-      retries: 3
+      retries: 5
 
-  # Analyzer Service
   analyzer-service:
-    build: ./analyzer-service
-    container_name: techstats-analyzer-service
+    build:
+      <<: *backend-build
+      dockerfile: analyzer-service/Dockerfile
     restart: unless-stopped
-    ports:
-      - "8002:8002"
     environment:
-      - ENVIRONMENT=development
-      - REDIS_URL=redis://redis:6379
-      - VACANCY_SERVICE_URL=http://vacancy-service:8001
-      - MAX_WORKERS=5
-      - BATCH_SIZE=10
-      - ANALYSIS_CACHE_TTL_HOURS=24
-      - PATTERN_CACHE_TTL_HOURS=168
-      - ENABLE_STEMMING=true
-      - ENABLE_LEMMATIZATION=true
-      - REMOVE_STOPWORDS=true
-      - LANGUAGE=ru
-      - CELERY_ENABLED=false
-    volumes:
-      - ./analyzer-service:/app
-      - ./shared:/app/shared
-      - ./analyzer-service/logs:/app/logs
-      - ./analyzer-service/data:/app/data
+      <<: *service-env
+      VACANCY_SERVICE_URL: http://vacancy-service:8001
+      MAX_WORKERS: ${ANALYZER_MAX_WORKERS:-5}
+      BATCH_SIZE: ${ANALYZER_BATCH_SIZE:-10}
+      ANALYSIS_CACHE_TTL_HOURS: ${ANALYSIS_CACHE_TTL_HOURS:-24}
+      PATTERN_CACHE_TTL_HOURS: ${PATTERN_CACHE_TTL_HOURS:-168}
+      ENABLE_STEMMING: ${ENABLE_STEMMING:-true}
+      ENABLE_LEMMATIZATION: ${ENABLE_LEMMATIZATION:-true}
+      REMOVE_STOPWORDS: ${REMOVE_STOPWORDS:-true}
+      LANGUAGE: ${ANALYZER_LANGUAGE:-ru}
+      CELERY_ENABLED: ${CELERY_ENABLED:-false}
     networks:
       - techstats-network
     depends_on:
@@ -242,86 +171,34 @@ services:
       vacancy-service:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8002/api/v1/health')"]
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8002/api/v1/health/ready')"]
       interval: 30s
       timeout: 10s
-      retries: 3
-
-  # Prometheus для мониторинга
-  prometheus:
-    image: prom/prometheus:latest
-    container_name: techstats-prometheus
-    restart: unless-stopped
-    ports:
-      - "9090:9090"
-    volumes:
-      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml
-      - prometheus-data:/prometheus
-    networks:
-      - techstats-network
-    command:
-      - '--config.file=/etc/prometheus/prometheus.yml'
-      - '--storage.tsdb.path=/prometheus'
-      - '--web.console.libraries=/etc/prometheus/console_libraries'
-      - '--web.console.templates=/etc/prometheus/consoles'
-      - '--storage.tsdb.retention.time=200h'
-      - '--web.enable-lifecycle'
-
-  # Grafana для визуализации
-  grafana:
-    image: grafana/grafana:latest
-    container_name: techstats-grafana
-    restart: unless-stopped
-    ports:
-      - "3000:3000"
-    volumes:
-      - grafana-data:/var/lib/grafana
-      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning
-    environment:
-      - GF_SECURITY_ADMIN_PASSWORD=admin
-      - GF_USERS_ALLOW_SIGN_UP=false
-    networks:
-      - techstats-network
-    depends_on:
-      - prometheus
-
-  # Node Exporter для системных метрик
-  node-exporter:
-    image: prom/node-exporter:latest
-    container_name: techstats-node-exporter
-    restart: unless-stopped
-    ports:
-      - "9100:9100"
-    networks:
-      - techstats-network
-    command:
-      - '--path.rootfs=/host'
+      retries: 5
 
   websocket-service:
-    build: ./websocket-service
-    container_name: techstats-websocket-service
+    build:
+      <<: *backend-build
+      dockerfile: websocket-service/Dockerfile
     restart: unless-stopped
-    ports:
-      - "8004:8004"
     environment:
-      - ENVIRONMENT=development
-      - REDIS_URL=redis://redis:6379
-      - ANALYZER_SERVICE_URL=http://analyzer-service:8002
-      - VACANCY_SERVICE_URL=http://vacancy-service:8001
-      - CACHE_SERVICE_URL=http://cache-service:8003
-      - WEBSOCKET_PING_INTERVAL=20
-      - WEBSOCKET_PING_TIMEOUT=30
-      - MAX_CONNECTIONS_PER_IP=10
-      - MAX_TOTAL_CONNECTIONS=1000
-      - CONNECTION_TIMEOUT=300
-      - SESSION_TTL_SECONDS=3600
-      - CLEANUP_INTERVAL_SECONDS=60
-      - PROGRESS_UPDATE_INTERVAL=0.5
-      - BATCH_SIZE_FOR_PROGRESS=10
-    volumes:
-      - ./websocket-service:/app
-      - ./shared:/app/shared
-      - ./websocket-service/logs:/app/logs
+      <<: *service-env
+      ANALYZER_SERVICE_URL: http://analyzer-service:8002
+      VACANCY_SERVICE_URL: http://vacancy-service:8001
+      CACHE_SERVICE_URL: http://cache-service:8003
+      WEBSOCKET_PING_INTERVAL: ${WEBSOCKET_PING_INTERVAL:-20}
+      WEBSOCKET_PING_TIMEOUT: ${WEBSOCKET_PING_TIMEOUT:-30}
+      MAX_CONNECTIONS_PER_IP: ${MAX_CONNECTIONS_PER_IP:-10}
+      MAX_TOTAL_CONNECTIONS: ${MAX_TOTAL_CONNECTIONS:-1000}
+      CONNECTION_TIMEOUT: ${CONNECTION_TIMEOUT:-300}
+      SESSION_TTL_SECONDS: ${SESSION_TTL_SECONDS:-3600}
+      CLEANUP_INTERVAL_SECONDS: ${WEBSOCKET_CLEANUP_INTERVAL_SECONDS:-60}
+      PROGRESS_UPDATE_INTERVAL: ${PROGRESS_UPDATE_INTERVAL:-0.5}
+      BATCH_SIZE_FOR_PROGRESS: ${BATCH_SIZE_FOR_PROGRESS:-10}
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:-}
+      JWT_ALGORITHM: ${JWT_ALGORITHM:-HS256}
+      ADMIN_TOKEN: ${WEBSOCKET_ADMIN_TOKEN:-}
+      CORS_ORIGINS: ${CORS_ORIGINS:-["http://localhost:8080"]}
     networks:
       - techstats-network
     depends_on:
@@ -334,20 +211,38 @@ services:
       cache-service:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8004/api/v1/health')"]
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8004/api/v1/health/ready')"]
       interval: 30s
       timeout: 10s
-      retries: 3
+      retries: 5
 
   frontend:
-    build: ./frontend
-    container_name: techstats-frontend
+    build:
+      context: ./frontend
+      target: runtime
     restart: unless-stopped
-    ports:
-      - "8088:80"
     networks:
       - techstats-network
     depends_on:
+      api-gateway:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1/healthz"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  nginx:
+    image: nginx:1.27-alpine
+    restart: unless-stopped
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/conf.d:/etc/nginx/conf.d:ro
+    networks:
+      - techstats-network
+    depends_on:
+      frontend:
+        condition: service_healthy
       api-gateway:
         condition: service_healthy
       vacancy-service:
@@ -362,7 +257,39 @@ services:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1/healthz"]
       interval: 30s
       timeout: 10s
-      retries: 3
+      retries: 5
+
+  prometheus:
+    image: prom/prometheus:v2.55.1
+    restart: unless-stopped
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    networks:
+      - techstats-network
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=${PROMETHEUS_RETENTION:-200h}
+      - --web.enable-lifecycle
+    depends_on:
+      redis-exporter:
+        condition: service_started
+
+  grafana:
+    image: grafana/grafana:11.3.1
+    restart: unless-stopped
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    networks:
+      - techstats-network
+    depends_on:
+      prometheus:
+        condition: service_started
 
 volumes:
   redis-data:

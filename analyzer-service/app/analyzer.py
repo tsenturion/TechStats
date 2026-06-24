@@ -1,4 +1,3 @@
-# C:\Users\user\Desktop\TechStats\analyzer-service\app\analyzer.py
 import re
 import asyncio
 import html

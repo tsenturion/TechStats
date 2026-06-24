@@ -6,15 +6,42 @@ import { useAuth } from './useAuth'
 
 const STORAGE_KEY = 'techstats_frontend_config_v1'
 
+function browserOrigin() {
+  if (typeof window === 'undefined') return 'http://localhost:8080'
+  return window.location.origin
+}
+
+function browserHostBase() {
+  if (typeof window === 'undefined') return 'http://localhost'
+  return `${window.location.protocol}//${window.location.hostname}`
+}
+
+const origin = browserOrigin()
+const hostBase = browserHostBase()
+const productionDefaults = {
+  gateway: import.meta.env.VITE_GATEWAY_URL || origin,
+  vacancy: import.meta.env.VITE_VACANCY_SERVICE_URL || `${origin}/services/vacancy`,
+  analyzer: import.meta.env.VITE_ANALYZER_SERVICE_URL || `${origin}/services/analyzer`,
+  cache: import.meta.env.VITE_CACHE_SERVICE_URL || `${origin}/services/cache`,
+  websocket: import.meta.env.VITE_WEBSOCKET_SERVICE_URL || `${origin}/services/websocket`,
+  prometheus: import.meta.env.VITE_PROMETHEUS_URL || `${hostBase}:9090`,
+  grafana: import.meta.env.VITE_GRAFANA_URL || `${hostBase}:3000`,
+  adminToken: import.meta.env.VITE_WEBSOCKET_ADMIN_TOKEN || '',
+}
+
+const developmentDefaults = {
+  gateway: import.meta.env.VITE_GATEWAY_URL || `${hostBase}:8000`,
+  vacancy: import.meta.env.VITE_VACANCY_SERVICE_URL || `${hostBase}:8001`,
+  analyzer: import.meta.env.VITE_ANALYZER_SERVICE_URL || `${hostBase}:8002`,
+  cache: import.meta.env.VITE_CACHE_SERVICE_URL || `${hostBase}:8003`,
+  websocket: import.meta.env.VITE_WEBSOCKET_SERVICE_URL || `${hostBase}:8004`,
+  prometheus: import.meta.env.VITE_PROMETHEUS_URL || `${hostBase}:9090`,
+  grafana: import.meta.env.VITE_GRAFANA_URL || `${hostBase}:3000`,
+  adminToken: import.meta.env.VITE_WEBSOCKET_ADMIN_TOKEN || '',
+}
+
 const defaults = {
-  gateway: 'http://localhost:8000',
-  vacancy: 'http://localhost:8001',
-  analyzer: 'http://localhost:8002',
-  cache: 'http://localhost:8003',
-  websocket: 'http://localhost:8004',
-  prometheus: 'http://localhost:9090',
-  grafana: 'http://localhost:3000',
-  adminToken: 'admin_secret_token',
+  ...(import.meta.env.PROD ? productionDefaults : developmentDefaults),
 }
 
 function readPersistedConfig() {

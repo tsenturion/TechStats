@@ -1,4 +1,3 @@
-# C:\Users\user\Desktop\TechStats\vacancy-service\app\cache.py
 import json
 import hashlib
 from typing import Optional, Any, Dict, List

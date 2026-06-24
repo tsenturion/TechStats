@@ -15,27 +15,33 @@ TechStats — микросервисная платформа для анали�
 ## Быстрый старт
 
 ```bash
-docker compose up -d --build
+docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build
 ```
 
 Остановка:
 
 ```bash
-docker compose down
+docker compose -f docker-compose.yml -f docker-compose.dev.yml down
+```
+
+Production-like запуск использует отдельный override и требует секреты в локальном `.env`:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
 ```
 
 ## Основные URL
 
-- Frontend: `http://localhost:8088`
+- Nginx edge / Frontend: `http://localhost:8080`
 - API Gateway: `http://localhost:8000`
 - Vacancy Service: `http://localhost:8001`
 - Analyzer Service: `http://localhost:8002`
 - Cache Service: `http://localhost:8003`
 - WebSocket Service: `http://localhost:8004`
 - Prometheus: `http://localhost:9090`
-- Grafana: `http://localhost:3000` (`admin/admin`)
+- Grafana: `http://localhost:3000`
 
-## Учетные записи по умолчанию
+## Учетные записи для dev
 
 - `admin / admin`
 - `user / user`
@@ -43,7 +49,8 @@ docker compose down
 
 ## Сервисы
 
-- `frontend` (`:8088`) — SPA-интерфейс
+- `nginx` (`:8080`) — HTTP edge proxy без TLS для локального запуска
+- `frontend` — SPA-интерфейс за Nginx edge proxy
 - `api-gateway` (`:8000`) — входная точка, proxy, auth, aggregation
 - `vacancy-service` (`:8001`) — поиск и детали вакансий через HH API
 - `analyzer-service` (`:8002`) — анализ технологий и статистика
@@ -52,17 +59,17 @@ docker compose down
 
 ## API Документация
 
-- Gateway: `http://localhost:8000/docs`
-- Vacancy: `http://localhost:8001/docs`
-- Analyzer: `http://localhost:8002/docs`
-- Cache: `http://localhost:8003/docs`
-- WebSocket Service: `http://localhost:8004/docs`
+- Gateway: `http://localhost:8080/docs`
+- Vacancy: `http://localhost:8080/services/vacancy/docs`
+- Analyzer: `http://localhost:8080/services/analyzer/docs`
+- Cache: `http://localhost:8080/services/cache/docs`
+- WebSocket Service: `http://localhost:8080/services/websocket/docs`
 
 ## Полная документация
 
 Полная документация проекта доступна прямо в интерфейсе сайта:
 
-- Откройте `http://localhost:8088`
+- Откройте `http://localhost:8080`
 - Перейдите в раздел `Documentation` в левом меню
 
 ## Тестирование

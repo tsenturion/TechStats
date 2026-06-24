@@ -1,4 +1,3 @@
-# C:\Users\user\Desktop\TechStats\api-gateway\app\rate_limiting.py
 from typing import Optional
 import redis.asyncio as redis
 from fastapi import Request, HTTPException

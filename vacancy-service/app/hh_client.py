@@ -1,4 +1,3 @@
-# C:\Users\user\Desktop\TechStats\vacancy-service\app\hh_client.py
 import asyncio
 import time
 from typing import Dict, Any, List, Optional

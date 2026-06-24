@@ -1,4 +1,3 @@
-# C:\Users\user\Desktop\TechStats\websocket-service\app\routers\admin.py
 import asyncio
 import time
 from typing import Optional

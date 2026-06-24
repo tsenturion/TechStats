@@ -1,4 +1,3 @@
-# C:\Users\user\Desktop\TechStats\analyzer-service\app\tech_patterns.py
 import json
 import re
 from typing import Dict, List, Set, Any, Optional

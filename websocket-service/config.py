@@ -1,4 +1,3 @@
-# C:\Users\user\Desktop\TechStats\websocket-service\config.py
 from pydantic_settings import BaseSettings
 from typing import List
 
@@ -6,7 +5,7 @@ from typing import List
 class Settings(BaseSettings):
     # Основные настройки
     app_name: str = "TechStats WebSocket Service"
-    debug: bool = True
+    debug: bool = False
     environment: str = "production"
     version: str = "1.0.0"
     
@@ -42,15 +41,15 @@ class Settings(BaseSettings):
     log_level: str = "info"
     
     # JWT для аутентификации
-    jwt_secret_key: str = "your-websocket-secret-key-change-in-production"
+    jwt_secret_key: str = ""
     jwt_algorithm: str = "HS256"
     jwt_access_token_expire_minutes: int = 60
     
     # CORS
-    cors_origins: List[str] = ["*"]
+    cors_origins: List[str] = []
 
     # Admin
-    admin_token: str = "admin_secret_token"
+    admin_token: str = ""
     
     class Config:
         env_file = ".env"

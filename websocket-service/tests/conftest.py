@@ -49,6 +49,9 @@ def _purge_foreign_app_modules():
 _purge_foreign_app_modules()
 
 os.environ["DEBUG"] = "true"
+os.environ["JWT_SECRET_KEY"] = "test-jwt-secret"
+os.environ["ADMIN_TOKEN"] = "techstats-dev-websocket-admin-token"
+os.environ["CORS_ORIGINS"] = '["http://localhost:8088"]'
 
 
 @pytest.fixture(autouse=True)

@@ -86,7 +86,7 @@ def _client():
 
 
 def _admin_headers():
-    return {"Authorization": "Bearer admin_secret_token"}
+    return {"Authorization": "Bearer techstats-dev-websocket-admin-token"}
 
 
 def test_admin_connections_endpoints():

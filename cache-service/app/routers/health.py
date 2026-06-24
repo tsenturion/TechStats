@@ -1,4 +1,3 @@
-# C:\Users\user\Desktop\TechStats\cache-service\app\routers\health.py
 import time
 from datetime import datetime
 from fastapi import APIRouter, HTTPException, Depends, Request

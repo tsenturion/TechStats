@@ -1,4 +1,3 @@
-# C:\Users\user\Desktop\TechStats\websocket-service\app\analysis_proxy.py
 import asyncio
 from contextlib import suppress
 import json

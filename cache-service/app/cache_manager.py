@@ -1,4 +1,3 @@
-# C:\Users\user\Desktop\TechStats\cache-service\app\cache_manager.py
 import time
 import pickle
 from typing import Dict, Any, List, Optional, Union

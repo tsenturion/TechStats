@@ -1,4 +1,3 @@
-# C:\Users\user\Desktop\TechStats\vacancy-service\app\rate_limiter.py
 import time
 import asyncio
 import json

@@ -142,7 +142,7 @@ const tocItems = computed(() => [
 const serviceRows = computed(() => {
   if (isRu.value) {
     return [
-      { service: 'frontend', port: '8088', purpose: 'SPA-интерфейс со всеми рабочими сценариями.' },
+      { service: 'nginx', port: '8080', purpose: 'HTTP edge proxy и SPA-интерфейс.' },
       { service: 'api-gateway', port: '8000', purpose: 'Единая точка входа, proxy, auth и aggregation.' },
       { service: 'vacancy-service', port: '8001', purpose: 'Интеграция с HH API: поиск и детали вакансий.' },
       { service: 'analyzer-service', port: '8002', purpose: 'Анализ технологий, patterns CRUD, stats.' },
@@ -154,7 +154,7 @@ const serviceRows = computed(() => {
   }
 
   return [
-    { service: 'frontend', port: '8088', purpose: 'SPA interface with all operational workflows.' },
+    { service: 'nginx', port: '8080', purpose: 'HTTP edge proxy and SPA interface.' },
     { service: 'api-gateway', port: '8000', purpose: 'Single entry point, proxy, auth, and aggregation.' },
     { service: 'vacancy-service', port: '8001', purpose: 'HH API integration: vacancy search and details.' },
     { service: 'analyzer-service', port: '8002', purpose: 'Technology analysis, patterns CRUD, stats.' },
@@ -269,11 +269,11 @@ const runtimeKeys = [
 ]
 
 const swaggerRows = [
-  { service: 'API Gateway', url: 'http://localhost:8000/docs' },
-  { service: 'Vacancy Service', url: 'http://localhost:8001/docs' },
-  { service: 'Analyzer Service', url: 'http://localhost:8002/docs' },
-  { service: 'Cache Service', url: 'http://localhost:8003/docs' },
-  { service: 'WebSocket Service', url: 'http://localhost:8004/docs' },
+  { service: 'API Gateway', url: '/docs' },
+  { service: 'Vacancy Service', url: '/services/vacancy/docs' },
+  { service: 'Analyzer Service', url: '/services/analyzer/docs' },
+  { service: 'Cache Service', url: '/services/cache/docs' },
+  { service: 'WebSocket Service', url: '/services/websocket/docs' },
 ]
 
 const endpointGroups = [
@@ -549,14 +549,14 @@ const metricsItems = computed(() => {
             </tr>
           </thead>
           <tbody>
-            <tr><td class="font-mono text-xs">http://localhost:8088</td><td>Frontend</td></tr>
+            <tr><td class="font-mono text-xs">http://localhost:8080</td><td>Nginx edge / Frontend</td></tr>
             <tr><td class="font-mono text-xs">http://localhost:8000</td><td>API Gateway</td></tr>
             <tr><td class="font-mono text-xs">http://localhost:8001</td><td>Vacancy Service</td></tr>
             <tr><td class="font-mono text-xs">http://localhost:8002</td><td>Analyzer Service</td></tr>
             <tr><td class="font-mono text-xs">http://localhost:8003</td><td>Cache Service</td></tr>
             <tr><td class="font-mono text-xs">http://localhost:8004</td><td>WebSocket Service</td></tr>
             <tr><td class="font-mono text-xs">http://localhost:9090</td><td>Prometheus</td></tr>
-            <tr><td class="font-mono text-xs">http://localhost:3000</td><td>Grafana (admin/admin)</td></tr>
+            <tr><td class="font-mono text-xs">http://localhost:3000</td><td>Grafana</td></tr>
           </tbody>
         </table>
       </div>

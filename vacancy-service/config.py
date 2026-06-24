@@ -1,11 +1,10 @@
-# C:\Users\user\Desktop\TechStats\vacancy-service\config.py
 from pydantic_settings import BaseSettings
 
 
 class Settings(BaseSettings):
     # Основные настройки
     app_name: str = "TechStats Vacancy Service"
-    debug: bool = True
+    debug: bool = False
     environment: str = "production"
     version: str = "1.0.0"
     

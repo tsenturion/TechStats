@@ -1,4 +1,3 @@
-# C:\Users\user\Desktop\TechStats\analyzer-service\app\routers\patterns.py
 from typing import Dict, Any, Optional
 from fastapi import APIRouter, HTTPException, Body, Query, Depends, Request
 import structlog
